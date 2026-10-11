@@ -1,6 +1,7 @@
 #include "protocol/rtsp/rtsp_listener.hpp"
 #include "protocol/rtsp/rtsp.h"
 #include "runtime/common.h"
+#include "session/session_state.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <future>
@@ -31,6 +32,19 @@ static bool rejectBind = false;
 static std::vector<int> failedSockets;
 static std::promise<int> exitRequested;
 static bool isolatedChild = false;
+static std::atomic<bool> captureTiming{false};
+static std::promise<std::shared_ptr<SharedRtpTimingSettings>> acceptedTiming;
+static sockaddr_in boundAddress{};
+
+std::unique_ptr<SessionState> realSessionCreate(std::shared_ptr<SharedRtpTimingSettings>)
+    asm("__real__ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsE");
+std::unique_ptr<SessionState> wrappedSessionCreate(std::shared_ptr<SharedRtpTimingSettings>)
+    asm("__wrap__ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsE");
+std::unique_ptr<SessionState> wrappedSessionCreate(std::shared_ptr<SharedRtpTimingSettings> timing) {
+  auto session = realSessionCreate(timing);
+  if (captureTiming.exchange(false)) acceptedTiming.set_value(std::move(timing));
+  return session;
+}
 
 static int runIsolated(const char *mode, const char *filter = "") {
   const pid_t child = fork();
@@ -69,7 +83,7 @@ static int failedWorkerCreation() {
   restricted.rlim_cur = 0;
   if (setrlimit(RLIMIT_NPROC, &restricted) != 0)
     return 12;
-  int error = rtsp_listener_start();
+  int error = rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0));
   if (setrlimit(RLIMIT_NPROC, &previous) != 0 || error != EAGAIN)
     return 13;
   rtsp_listener_stop();
@@ -83,7 +97,7 @@ int main(int argc, char **argv) {
   if (argc >= 2 && std::string(argv[1]) == "--listener-exit") {
     config.port = 0;
     observeWait = true;
-    if (rtsp_listener_start() != 0 || !waiting.try_acquire_for(500ms))
+    if (rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0)) != 0 || !waiting.try_acquire_for(500ms))
       return 19;
     return 0;
   }
@@ -122,7 +136,12 @@ extern "C" int __wrap_bind(int fd, const sockaddr *address, socklen_t size) {
     errno = EADDRINUSE;
     return -1;
   }
-  return __real_bind(fd, address, size);
+  int result = __real_bind(fd, address, size);
+  if (result == 0 && address->sa_family == AF_INET) {
+    socklen_t length = sizeof(boundAddress);
+    getsockname(fd,reinterpret_cast<sockaddr *>(&boundAddress),&length);
+  }
+  return result;
 }
 
 extern "C" void __wrap_exit_request(int status) { exitRequested.set_value(status); }
@@ -278,12 +297,47 @@ TEST(RtspListener, ProtocolLoopStopsWhileWaitingForConnection) {
   }
   config.port = 0;
   observeWait = true;
-  ASSERT_EQ(rtsp_listener_start(), 0);
+  ASSERT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0)), 0);
   ASSERT_TRUE(waiting.try_acquire_for(500ms));
   auto stop = std::async(std::launch::async, rtsp_listener_stop);
   EXPECT_EQ(stop.wait_for(500ms), std::future_status::ready);
   stop.get();
   rtsp_listener_stop();
+}
+
+TEST(RtspListener, AcceptedSessionReceivesExactOwnerAndRetainsItAfterListenerStops) {
+  if (!isolatedChild) {
+    EXPECT_EQ(runIsolated("--listener-child",
+        "--gtest_filter=RtspListener.AcceptedSessionReceivesExactOwnerAndRetainsItAfterListenerStops"), 0);
+    return;
+  }
+  config.port = 0;
+  observeWait = true;
+  captureTiming = true;
+  auto timing = std::make_shared<SharedRtpTimingSettings>(-0.125);
+  auto *identity = timing.get();
+  auto accepted = acceptedTiming.get_future();
+  ASSERT_EQ(rtsp_listener_start(timing),0);
+  ASSERT_TRUE(waiting.try_acquire_for(500ms));
+  const int client = socket(AF_INET,SOCK_STREAM | SOCK_CLOEXEC,0);
+  ASSERT_GE(client,0);
+  boundAddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&boundAddress),sizeof(boundAddress)),0);
+  ASSERT_EQ(accepted.wait_for(500ms),std::future_status::ready);
+  auto passed = accepted.get();
+  EXPECT_EQ(passed.get(),identity);
+  auto retained = SessionState::create(passed);
+  timing.reset(); passed.reset();
+  rtsp_listener_stop();
+  close(client);
+  EXPECT_EQ(&retained->timingSettings(),identity);
+  EXPECT_DOUBLE_EQ(retained->timingSettings().offsetSeconds(),-0.125);
+  retained->timingSettings().disableForInsufficientLatency();
+  EXPECT_DOUBLE_EQ(retained->timingSettings().offsetSeconds(),0);
+}
+
+TEST(RtspListener, MissingTimingOwnerDoesNotStartListener) {
+  EXPECT_EQ(rtsp_listener_start(nullptr),EINVAL);
 }
 
 TEST(RtspListener, FailedBindRequestsExitAndReleasesEverySocket) {
@@ -295,7 +349,7 @@ TEST(RtspListener, FailedBindRequestsExitAndReleasesEverySocket) {
   config.port = 0;
   rejectBind = true;
   auto failed = exitRequested.get_future();
-  ASSERT_EQ(rtsp_listener_start(), 0);
+  ASSERT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0)), 0);
   ASSERT_EQ(failed.wait_for(500ms), std::future_status::ready);
   EXPECT_EQ(failed.get(), EXIT_FAILURE);
   rtsp_listener_stop();

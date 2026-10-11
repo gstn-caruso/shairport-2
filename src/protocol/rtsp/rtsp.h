@@ -4,6 +4,9 @@
 #include "playback/player.h"
 
 #ifdef __cplusplus
+#include <memory>
+class SharedRtpTimingSettings;
+int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing);
 class RtspMessage;
 using rtsp_message = RtspMessage;
 extern "C" {
@@ -27,7 +30,6 @@ enum rtsp_read_request_response {
 enum rtsp_read_request_response rtsp_read_request(rtsp_conn_info *conn, rtsp_message **message);
 int msg_write_response(rtsp_conn_info *conn, rtsp_message *message);
 
-int rtsp_listener_start(void);
 void rtsp_listener_stop(void);
 
 // this can be used to [try to] forcibly stop a play session

@@ -75,6 +75,7 @@
 #include "runtime/common.h"
 #include "protocol/rtp/rtp.h"
 #include "protocol/rtsp/rtsp.h"
+#include "timing/shared_rtp_timing_settings.hpp"
 #include "platform/utilities/string_utilities.h"
 #include "platform/utilities/exit.h"
 
@@ -858,7 +859,9 @@ int ReceiverApplication::run(ReceiverSettings settings) {
 
   activity_monitor_start();
   debug(4, "create an RTSP listener");
-  int listenerError = rtsp_listener_start();
+  auto timingSettings = std::make_shared<SharedRtpTimingSettings>(
+      processSettings->settings().audio().audio_backend_latency_offset);
+  int listenerError = rtsp_listener_start(timingSettings);
   if (listenerError)
     die("Cannot create RTSP listener: %s", strerror(listenerError));
 
