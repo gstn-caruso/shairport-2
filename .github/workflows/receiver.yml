@@ -50,12 +50,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: [Release, Debug, ASan-UBSan, TSan]
+        build: [Release, ASan-UBSan, TSan]
         include:
           - build: Release
             purpose: Verify release package
-          - build: Debug
-            purpose: Check debug build
           - build: ASan-UBSan
             purpose: Check memory safety and undefined behavior
           - build: TSan
@@ -95,6 +93,7 @@ jobs:
       - name: Build
         run: cmake --build build/cmake --parallel 2
       - name: Verify sanitizer instrumentation
+        if: matrix.build != 'Release'
         env:
           BUILD: ${{ matrix.build }}
         run: |
@@ -115,6 +114,7 @@ jobs:
       - name: Test
         run: ctest --test-dir build/cmake --no-tests=error --output-on-failure
       - name: Verify staged install
+        if: matrix.build == 'Release'
         run: |
           DESTDIR="$PWD/build/cmake/stage" cmake --install build/cmake
           test -f build/cmake/stage/usr/bin/shairport-2

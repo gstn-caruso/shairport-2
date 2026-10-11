@@ -172,8 +172,9 @@ companion shared memory prevents listening and discovery at startup.
 
 ## Validation
 
-CI runs Release, Debug, ASan+UBSan and TSan builds, CTest contracts and staged
-installation checks. The suite covers CLI/configuration, session/principal
+CI runs three AMD64 builds: Release, ASan+UBSan and TSan. All run CTest contracts;
+only Release runs staged installation checks, Debian packaging and package
+uploads. The suite covers CLI/configuration, session/principal
 ownership, RTSP framing and parameters, encrypted buffered/realtime/control
 reception, event transport, pairing transcripts, audio conversion/output, timing
 and companion socket/shared-memory integration. Independent component targets
