@@ -22,9 +22,13 @@ supported-family address fails startup on conflict. Endpoint and mapping-call
 injection is internal to tests; the executable keeps the upstream endpoints.
 Unused legacy per-client mappings and the old socket-opening helper were removed.
 
-Packet handlers retain upstream timing arithmetic, first-peer selection,
-awakening announcements and T/B/E/P semantics. Boundary changes reject malformed
-control before mutation, check signed lengths before packet access, copy wire
+Packet handlers retain upstream timing arithmetic, first-peer selection and
+awakening announcements. Repeated T commands for the same first peer preserve
+clock smoothing and mastership while timing is active or its existing validity
+period has not expired. They do not extend that validity period. Expired clocks,
+changed first peers and T commands without peers retain upstream reset semantics.
+Boundary changes reject malformed control before mutation, check signed lengths
+before packet access, copy wire
 messages to typed packed objects, and remove unchecked optional TLV diagnostics.
 Wire layouts use platform packing pragmas with standard fixed-size members,
 replacing zero-length array members. There is no GNU language-extension mode.
