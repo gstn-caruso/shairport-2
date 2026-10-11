@@ -7,6 +7,8 @@
 #include "playback/player.h"
 #include "timing/rtp_clock.hpp"
 #include "timing/shared_rtp_timing_settings.hpp"
+#include "protocol/rtp/resend_coordinator.hpp"
+#include "transport/remote_control_peer.hpp"
 #include "audio/decoding/audio_decoder.hpp"
 #include "audio/format/audio_input_state.hpp"
 #include "audio/resampling/resampler.hpp"
@@ -70,7 +72,7 @@ struct SessionState : PrincipalParticipant {
   // RTP stuff
   // only one RTP session can be active at a time.
   int rtp_running;
-  uint64_t rtp_time_of_last_resend_request_error_ns;
+  ResendCoordinator resendCoordinator;
 
   char client_ip_string[INET6_ADDRSTRLEN]; // the ip string of the client
   uint16_t client_rtsp_port;
@@ -118,8 +120,7 @@ struct SessionState : PrincipalParticipant {
 
   int event_socket;
   int data_socket;
-  SOCKADDR ap2_remote_control_socket_addr; // a socket pointing to the control port of the client
-  socklen_t ap2_remote_control_socket_addr_length;
+  RemoteControlPeer remoteControlPeer;
   int ap2_control_socket;
   int realtime_audio_socket;
   int buffered_audio_socket;
