@@ -1,3 +1,9 @@
+## [6.1.11](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.10...v6.1.11) (2026-10-11)
+
+### Bug Fixes
+
+* **transport:** own control UDP lifetime and wake blocked operations ([#66](https://github.com/gstn-caruso/shairport-sync/issues/66)) ([06a4799](https://github.com/gstn-caruso/shairport-sync/commit/06a4799c6dd6369f9a78a98663d198e5cf2dfacf))
+
 ## [6.1.10](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.9...v6.1.10) (2026-10-11)
 
 ### Bug Fixes
