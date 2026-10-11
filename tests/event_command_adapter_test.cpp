@@ -137,7 +137,9 @@ TEST(EventCommandRuntime, CancellationDuringNativeEncryptedResponseUnlocksAndClo
   std::array<uint8_t,4096> request{};
   EXPECT_GT(read_encrypted(sockets[1],&peer,request.data(),request.size()),0);
   EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0);
-  session.eventCommandExchange.close(); EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1);
+  auto closing = std::async(std::launch::async,[&] { session.eventCommandExchange.close(); });
+  ASSERT_EQ(closing.wait_for(std::chrono::milliseconds(500)),std::future_status::ready);
+  closing.get(); EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1);
   EXPECT_NE(cipher.cipher_ctx,nullptr);
   cipher.release(); peer.release(); close(sockets[1]); observedReadFd = -1;
 }
