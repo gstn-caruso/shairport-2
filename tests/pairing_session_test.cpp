@@ -135,6 +135,12 @@ TEST_F(PairingSessionNative, EventFailureRetainsPreparedControlAndSuccessfulSetu
   EXPECT_EQ(preparedChannels,(std::vector<int>{3,4}));
   EXPECT_TRUE(server.controlChannel().prepared()); EXPECT_FALSE(server.eventChannel().prepared());
 }
+TEST_F(PairingSessionNative, DataCipherFailureLeavesControlAndEventUsable) {
+  exchange(true); failedCipherChannel = 5;
+  EXPECT_EQ(server.prepareDataChannel(42),DataPreparation::cipherFailed);
+  EXPECT_FALSE(server.dataChannel().prepared());
+  proveChannel(server.controlChannel(),0,""); proveChannel(server.eventChannel(),1,"");
+}
 
 TEST(PairingSession, UnconfiguredOwnerIsExplicitlyInertAndReleaseIsRepeatable) {
   PairingSession session;
