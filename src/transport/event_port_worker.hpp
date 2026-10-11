@@ -24,6 +24,7 @@ public:
   // callbacks must not throw or invoke stop on this worker's own thread.
   std::expected<void,int> start(int boundFd,EventCommandExchange &exchange,
                               ChannelFactory factory,std::function<void()> initialCommand);
+  void requestStop();
   int stop();
 private:
   void run();

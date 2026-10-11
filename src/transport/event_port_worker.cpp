@@ -85,6 +85,19 @@ void EventPortWorker::run() {
     return;
   }
 }
+void EventPortWorker::requestStop() {
+  std::shared_ptr<EventChannelInterrupt> interrupt;
+  {
+    std::lock_guard lock(mutex_);
+    if (joining_ || !thread_.joinable()) return;
+    stopping_ = true;
+    const uint64_t signal = 1;
+    while (write(wake_,&signal,sizeof(signal)) < 0 && errno == EINTR) {}
+    interrupt = interrupt_;
+  }
+  if (interrupt) interrupt->interrupt();
+}
+
 int EventPortWorker::stop() {
   int previous; pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,&previous);
   int result;

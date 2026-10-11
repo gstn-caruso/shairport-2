@@ -131,6 +131,7 @@ TEST(EventPortWorker, StopDuringFactoryRegistrationInterruptsAndRejectsLateChann
   const int client = socket(AF_INET,SOCK_STREAM,0);
   ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&listener.address),sizeof(listener.address)),0);
   ASSERT_EQ(reached.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  worker.requestStop();
   auto stopping = std::async(std::launch::async,[&]{ return worker.stop(); });
   EXPECT_EQ(stopping.wait_for(std::chrono::milliseconds(30)),std::future_status::timeout);
   release.set_value();
