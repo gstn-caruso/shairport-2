@@ -47,6 +47,7 @@ void ControlDatagramChannel::release() {
   std::lock_guard lock(mutex_);
   --operations_; released_.notify_all();
 }
+bool ControlDatagramChannel::stopped() { std::lock_guard lock(mutex_); return stopped_; }
 void ControlDatagramChannel::deactivateAndRequestStop() {
   int wake;
   {
@@ -92,9 +93,22 @@ int ControlDatagramChannel::SendLease::setResendTimeout() {
 }
 ControlSendResult ControlDatagramChannel::SendLease::sendTo(std::span<const uint8_t> bytes,
                                                           const RemoteControlPeerSnapshot &peer) {
-  const auto count = sendto(fd_,bytes.data(),bytes.size(),0,
-                           reinterpret_cast<const sockaddr *>(&peer.address),peer.length);
-  return {count,count < 0 ? errno : 0};
+  const auto deadline = std::chrono::steady_clock::now()+std::chrono::milliseconds(100);
+  for (;;) {
+    if (owner_->stopped()) return {-1,ECANCELED,true};
+    const auto count = sendto(fd_,bytes.data(),bytes.size(),MSG_DONTWAIT,
+                             reinterpret_cast<const sockaddr *>(&peer.address),peer.length);
+    const int error = count < 0 ? errno : 0;
+    if (count >= 0 || (error != EAGAIN && error != EWOULDBLOCK)) return {count,error};
+    const auto remaining = deadline-std::chrono::steady_clock::now();
+    if (remaining <= std::chrono::steady_clock::duration::zero()) return {-1,EAGAIN};
+    const int milliseconds = std::chrono::ceil<std::chrono::milliseconds>(remaining).count();
+    pollfd ready[2]{{fd_,POLLOUT,0},{wake_,POLLIN,0}};
+    const int result = poll(ready,2,milliseconds);
+    if (result < 0) return {-1,errno};
+    if (ready[1].revents) return {-1,ECANCELED,true};
+    if (result == 0) return {-1,EAGAIN};
+  }
 }
 ControlReceiveResult ControlDatagramChannel::receive(std::span<uint8_t> bytes) {
   auto lease = acquire(false);

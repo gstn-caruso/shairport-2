@@ -46,6 +46,7 @@ public:
 private:
   SendLease acquire(bool requireActive);
   void release();
+  bool stopped();
   std::mutex mutex_;
   std::condition_variable released_;
   int fd_ = -1,wake_ = -1;

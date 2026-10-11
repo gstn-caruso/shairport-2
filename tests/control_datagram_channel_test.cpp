@@ -7,6 +7,35 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <cstring>
+#include <utility>
+#include <atomic>
+#include <poll.h>
+
+static std::atomic<bool> blockedKernel{false};
+static std::atomic<unsigned> sends{0},polls{0};
+static std::atomic<bool> observeReceivePoll{false};
+static std::promise<void> receivePolling;
+extern "C" ssize_t __real_sendto(int,const void *,size_t,int,const sockaddr *,socklen_t);
+extern "C" ssize_t __wrap_sendto(int fd,const void *bytes,size_t length,int flags,const sockaddr *peer,socklen_t size) {
+  if (!blockedKernel.load()) return __real_sendto(fd,bytes,length,flags,peer,size);
+  EXPECT_NE(flags & MSG_DONTWAIT,0); ++sends; errno = EAGAIN; return -1;
+}
+extern "C" int __real_setsockopt(int,int,int,const void *,socklen_t);
+extern "C" int __wrap_setsockopt(int fd,int level,int option,const void *value,socklen_t size) {
+  if (!blockedKernel.load()) return __real_setsockopt(fd,level,option,value,size);
+  errno = ENOPROTOOPT; return -1;
+}
+extern "C" int __real_poll(pollfd *,nfds_t,int);
+extern "C" int __wrap_poll(pollfd *ready,nfds_t count,int timeout) {
+  if (observeReceivePoll.exchange(false)) receivePolling.set_value();
+  if (!blockedKernel.load()) return __real_poll(ready,count,timeout);
+  ++polls;
+  EXPECT_EQ(count,2u); EXPECT_GT(timeout,0); EXPECT_LE(timeout,100);
+  pollfd waiting[2]{ready[0],ready[1]}; waiting[0].events = 0;
+  const int result = __real_poll(waiting,2,timeout);
+  ready[0].revents = waiting[0].revents; ready[1].revents = waiting[1].revents;
+  return result;
+}
 
 using namespace std::chrono_literals;
 struct DatagramEndpoint {
@@ -96,4 +125,54 @@ TEST(ControlDatagramChannel, SendAndReceiveUseIndependentLeases) {
   owner.deactivateAndRequestStop();
   ASSERT_EQ(receiving.wait_for(500ms),std::future_status::ready); EXPECT_TRUE(receiving.get().stopped);
   lease = {};
+}
+
+TEST(ControlDatagramChannel, EnforcesSendBudgetDespiteTimeoutSetupFailureWithoutBusySpin) {
+  DatagramEndpoint endpoint,peer;
+  ControlDatagramChannel owner;
+  ASSERT_EQ(owner.adopt(std::exchange(endpoint.fd,-1)),0); owner.activate();
+  auto lease = owner.trySendLease(); ASSERT_TRUE(lease);
+  sends = polls = 0; blockedKernel = true;
+  EXPECT_EQ(lease.setResendTimeout(),ENOPROTOOPT);
+  const std::array<uint8_t,8> bytes{};
+  const auto start = std::chrono::steady_clock::now();
+  const auto result = lease.sendTo(bytes,peer.peer);
+  const auto elapsed = std::chrono::steady_clock::now()-start;
+  blockedKernel = false;
+  EXPECT_EQ(result.count,-1); EXPECT_EQ(result.errorCode,EAGAIN); EXPECT_FALSE(result.stopped);
+  EXPECT_GE(elapsed,80ms); EXPECT_LT(elapsed,500ms);
+  EXPECT_EQ(sends.load(),1u); EXPECT_EQ(polls.load(),1u);
+}
+
+TEST(ControlDatagramChannel, StopInterruptsWouldBlockSendBudget) {
+  DatagramEndpoint endpoint,peer;
+  ControlDatagramChannel owner;
+  ASSERT_EQ(owner.adopt(std::exchange(endpoint.fd,-1)),0); owner.activate();
+  auto lease = owner.trySendLease(); ASSERT_TRUE(lease);
+  sends = polls = 0; blockedKernel = true;
+  const std::array<uint8_t,8> bytes{};
+  auto sending = std::async(std::launch::async,[&]{ return lease.sendTo(bytes,peer.peer); });
+  EXPECT_EQ(sending.wait_for(20ms),std::future_status::timeout);
+  owner.deactivateAndRequestStop();
+  ASSERT_EQ(sending.wait_for(500ms),std::future_status::ready);
+  auto result = sending.get(); blockedKernel = false;
+  EXPECT_TRUE(result.stopped); EXPECT_EQ(result.errorCode,ECANCELED);
+  lease = {}; owner.close();
+}
+
+TEST(ControlDatagramChannel, NativePollCancellationReleasesReceiveLeaseBeforeClose) {
+  DatagramEndpoint endpoint;
+  ControlDatagramChannel owner;
+  const int fd = endpoint.fd;
+  ASSERT_EQ(owner.adopt(std::exchange(endpoint.fd,-1)),0);
+  auto polling = receivePolling.get_future(); observeReceivePoll = true;
+  pthread_t worker;
+  ASSERT_EQ(pthread_create(&worker,nullptr,[](void *context)->void * {
+    std::array<uint8_t,8> bytes{};
+    static_cast<ControlDatagramChannel *>(context)->receive(bytes);
+    return nullptr;
+  },&owner),0);
+  ASSERT_EQ(polling.wait_for(500ms),std::future_status::ready);
+  EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0);
+  owner.close(); EXPECT_EQ(fcntl(fd,F_GETFD),-1);
 }
