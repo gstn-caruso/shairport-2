@@ -1,3 +1,13 @@
+## [7.0.0](https://github.com/gstn-caruso/shairport-2/compare/v6.1.17...v7.0.0) (2026-10-11)
+
+### ⚠ BREAKING CHANGES
+
+* Executables, Debian package, configuration defaults and systemd units now use shairport-2 instead of shairport-sync. Existing installations must follow the migration guide before activating the renamed services.
+
+### Features
+
+* rename project and programs to shairport-2 ([#75](https://github.com/gstn-caruso/shairport-2/issues/75)) ([4a9ef4d](https://github.com/gstn-caruso/shairport-2/commit/4a9ef4dea16dd7d1d6fb4fcf4f65433b7e22f4c7))
+
 ## [6.1.17](https://github.com/gstn-caruso/shairport-2/compare/v6.1.16...v6.1.17) (2026-10-11)
 
 ### Bug Fixes
