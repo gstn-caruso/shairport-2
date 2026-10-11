@@ -9,6 +9,16 @@ extern "C" {
 #include <memory>
 #include <cstdlib>
 #include <vector>
+#include "transport/encrypted_channel.hpp"
+
+TEST(EncryptedChannel, EmptyReleaseIsRepeatable) {
+  EncryptedChannel channel;
+  EXPECT_FALSE(channel.prepared());
+  EXPECT_FALSE(channel.responsesEncrypted());
+  channel.release();
+  channel.release();
+  EXPECT_FALSE(channel.prepared());
+}
 
 TEST(PairCipherFailure, DecryptFailureClearsReleasedOutputBeforeCallerCleanup) {
   const std::array<uint8_t,32> key{};
