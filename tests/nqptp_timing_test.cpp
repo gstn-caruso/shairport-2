@@ -178,6 +178,54 @@ TEST_F(NqptpTiming, FollowUpBeforeAnnouncementDoesNotPublish) {
 }
 
 #ifndef NQPTP_REFERENCE
+TEST_F(NqptpTiming, RepeatedFirstPeerPreservesMastershipOnBriefResume) {
+  start();
+  follow(1000000000, 10000000000);
+  control("E", 1200000000);
+  control("T 127.0.0.2 127.0.0.4", 1300000000);
+  control("B", 1400000000);
+  announce();
+  follow(1500000000, 10500000000);
+  expectPublished(42, 1500000000, 9000000000, 1000000000);
+}
+
+TEST_F(NqptpTiming, RepeatedActivePeerPreservesSmoothingAndMastership) {
+  start();
+  follow(1000000000, 10000000000);
+  follow(1125000000, 10126000000);
+  control("T 127.0.0.2", 7000000000);
+  announce();
+  follow(7125000000, 16124000000);
+  expectPublished(42, 7125000000, 9000992188, 1000000000);
+}
+
+TEST_F(NqptpTiming, RepeatedPeerDoesNotExtendBriefResumeValidity) {
+  start();
+  follow(1000000000, 10000000000);
+  control("E", 1200000000);
+  control("T 127.0.0.2", 1300000000);
+  control("B", 4000000000);
+  follow(4125000000, 15125000000);
+  expectPublished(42, 1000000000, 9000000000, 1000000000);
+  follow(4250000000, 15250000000);
+  expectPublished(42, 4250000000, 11000000000, 4250000000);
+}
+
+TEST_F(NqptpTiming, RepeatedExpiredPeerStartsFreshMastership) {
+  for (uint64_t time : {3450000000ULL, 4000000000ULL}) {
+    start();
+    follow(1000000000, 10000000000);
+    control("E", 1200000000);
+    control("T 127.0.0.2", time);
+    control("B", time);
+    announce();
+    follow(time + 125000000, time + 11125000000);
+    expectPublished(42, time + 125000000, 11000000000, time + 125000000);
+    control("T", time + 250000000);
+    expectPublished(0, 0, 0, 0);
+  }
+}
+
 TEST_F(NqptpTiming, MalformedControlPreservesAnEstablishedTimingGroup) {
   start();
   follow(1000000000, 10000000000);

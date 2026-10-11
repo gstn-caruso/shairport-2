@@ -179,6 +179,13 @@ void handle_control_port_messages(char *buf, ssize_t recv_len,
             update_master_clock_info(0, NULL, 0, 0, 0); // the SMI may have obsolete stuff in it
           } else {
             debug(2, "Start Timing");
+            char *new_ip = strcmp(command, "T") == 0 && ip_list != NULL
+                               ? strsep(&ip_list, " ")
+                               : NULL;
+            if (new_ip != NULL && find_clock_source_record(new_ip, clock_private_info) != -1 &&
+                (clock_is_active || (clock_validity_expiration_time != 0 &&
+                                     reception_time < clock_validity_expiration_time)))
+              return;
             // dirty experimental hack -- delete all the clocks
             int gc;
             for (gc = 0; gc < MAX_CLOCKS; gc++) {
@@ -198,8 +205,7 @@ void handle_control_port_messages(char *buf, ssize_t recv_len,
 
               // take the first ip and make it the master, permanently
 
-              if (ip_list != NULL) {
-                char *new_ip = strsep(&ip_list, " ");
+              if (new_ip != NULL) {
                 // look for the IP in the list of clocks, and create an inert entry if not there
                 if ((new_ip != NULL) && (new_ip[0] != 0)) {
                   int t = find_clock_source_record(new_ip, clock_private_info);
