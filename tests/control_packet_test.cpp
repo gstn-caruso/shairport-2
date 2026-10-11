@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <limits>
+#include <vector>
+#include <span>
+#include <cerrno>
 import receiver.protocol.ap2.control_packet;
 
 TEST(ControlLatency, NormalLatencyTruncatesBufferFramesAndWarningZeroUsesSourceLatency) {
@@ -31,4 +34,21 @@ TEST(ControlLatency, WrappedFrameDifferenceAndFractionalIntBoundaryPreserveDefin
   ASSERT_TRUE(wrapped); EXPECT_EQ(wrapped->stream,77175); EXPECT_EQ(wrapped->total,88200);
   auto boundary = ControlLatency::calculate(0,0xffffd4ef,1,0,2147483647.9,true);
   ASSERT_TRUE(boundary); EXPECT_EQ(boundary->source,0); EXPECT_EQ(boundary->total,INT32_MAX);
+}
+static std::vector<uint8_t> controlBytes(uint8_t type = 0xd6,bool sentinel = true) {
+  std::vector<uint8_t> bytes(28); bytes[0] = sentinel ? 0x10 : 0; bytes[1] = type; return bytes;
+}
+static ControlLiveSettings settings(bool realtime = true) { return {realtime,44100,0.1,0,false,0}; }
+TEST(ControlPacketCoordinator, FirstErrorInitializesAndShortPacketDoesNotDraw) {
+  ControlPacketCoordinator coordinator(1000000000);
+  unsigned draws = 0;
+  const auto random = [&]{ ++draws; return 1.0; };
+  auto error = coordinator.handle({{},EIO,1000000000},settings(),random);
+  ASSERT_EQ(error.size(),2u);
+  EXPECT_EQ(error[0].kind,ControlEffectKind::initialized);
+  EXPECT_EQ(error[1].kind,ControlEffectKind::error); EXPECT_EQ(error[1].errorCode,EIO);
+  std::vector<uint8_t> shortPacket(27);
+  auto malformed = coordinator.handle({shortPacket,0,1000000000},settings(),random);
+  ASSERT_EQ(malformed.size(),1u); EXPECT_EQ(malformed[0].kind,ControlEffectKind::malformed);
+  EXPECT_EQ(malformed[0].bytes.size(),27u); EXPECT_EQ(draws,0u);
 }

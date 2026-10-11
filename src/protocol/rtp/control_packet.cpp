@@ -5,6 +5,8 @@ module;
 #include <optional>
 #include <cmath>
 #include <limits>
+#include <span>
+#include <functional>
 module receiver.protocol.ap2.control_packet;
 
 namespace {
@@ -16,6 +18,22 @@ std::optional<std::int32_t> truncatedFrames(double seconds,unsigned rate) {
     return std::nullopt;
   return static_cast<std::int32_t>(truncated);
 }
+}
+ControlDecision ControlPacketCoordinator::handle(ControlRead read,ControlLiveSettings,
+                                                const std::function<double()> &) {
+  ControlDecision decision;
+  if (!initialized_) {
+    initialized_ = true; packetCount_ = 0;
+    decision.append({ControlEffectKind::initialized});
+  }
+  if (read.errorCode != 0) {
+    ControlEffect error{ControlEffectKind::error}; error.errorCode = read.errorCode;
+    decision.append(error); return decision;
+  }
+  if (read.bytes.size() < 28) decision.append({ControlEffectKind::malformed,read.bytes});
+  return decision;
+}
+namespace {
 bool fitsLatency(std::int64_t value) {
   return value >= std::numeric_limits<std::int32_t>::min() && value <= std::numeric_limits<std::int32_t>::max();
 }
