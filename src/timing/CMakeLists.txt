@@ -1,2 +1,6 @@
 add_library(receiver-rtp-clock STATIC rtp_clock.cpp)
 target_sources(receiver PRIVATE ptp-utilities.cpp)
+add_library(receiver-rtp-timing-settings STATIC shared_rtp_timing_settings.cpp)
+target_include_directories(receiver-rtp-timing-settings PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(receiver-rtp-timing-settings PUBLIC Threads::Threads)
+target_link_libraries(receiver PUBLIC receiver-rtp-timing-settings)
