@@ -7,6 +7,7 @@ module;
 #include <limits>
 #include <span>
 #include <functional>
+#include <cerrno>
 module receiver.protocol.ap2.control_packet;
 
 namespace {
@@ -19,18 +20,44 @@ std::optional<std::int32_t> truncatedFrames(double seconds,unsigned rate) {
   return static_cast<std::int32_t>(truncated);
 }
 }
-ControlDecision ControlPacketCoordinator::handle(ControlRead read,ControlLiveSettings,
-                                                const std::function<double()> &) {
+ControlDecision ControlPacketCoordinator::handle(ControlRead read,ControlLiveSettings settings,
+                                                const std::function<double()> &draw) {
   ControlDecision decision;
   if (!initialized_) {
     initialized_ = true; packetCount_ = 0;
     decision.append({ControlEffectKind::initialized});
   }
   if (read.errorCode != 0) {
+    if (read.errorCode == EAGAIN || read.errorCode == EWOULDBLOCK) {
+      if (settings.realtime) {
+        packetCount_ = 0;
+        decision.append({ControlEffectKind::resetAnchor});
+      }
+      return decision;
+    }
     ControlEffect error{ControlEffectKind::error}; error.errorCode = read.errorCode;
     decision.append(error); return decision;
   }
-  if (read.bytes.size() < 28) decision.append({ControlEffectKind::malformed,read.bytes});
+  if (read.bytes.size() < 28) {
+    decision.append({ControlEffectKind::malformed,read.bytes}); return decision;
+  }
+  const auto elapsed = std::bit_cast<std::int64_t>(read.nowNs-startNs_);
+  const bool sentinel = (read.bytes[0] & 0x10) != 0;
+  if (elapsed < 2000000 && !sentinel) {
+    ControlEffect stale{ControlEffectKind::stale}; stale.elapsedNs = elapsed;
+    decision.append(stale); return decision;
+  }
+  ++packetCount_;
+  if (packetCount_ == 1) {
+    ControlEffect first{ControlEffectKind::firstSentinel}; first.sentinel = sentinel;
+    decision.append(first);
+  }
+  if (packetCount_ == 0) return decision;
+  if (settings.dropFraction != 0 && !(draw() > settings.dropFraction)) {
+    decision.append({ControlEffectKind::diagnosticDrop}); return decision;
+  }
+  decision.append({ControlEffectKind::capturePeerIfAbsent});
+  if (read.bytes[1] == 0xd6) decision.append({ControlEffectKind::retransmit,read.bytes.subspan(6)});
   return decision;
 }
 namespace {

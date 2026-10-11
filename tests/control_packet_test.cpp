@@ -52,3 +52,51 @@ TEST(ControlPacketCoordinator, FirstErrorInitializesAndShortPacketDoesNotDraw) {
   ASSERT_EQ(malformed.size(),1u); EXPECT_EQ(malformed[0].kind,ControlEffectKind::malformed);
   EXPECT_EQ(malformed[0].bytes.size(),27u); EXPECT_EQ(draws,0u);
 }
+TEST(ControlPacketCoordinator, StrictTwoMillisecondStaleGateAndSentinelBypassControlCounting) {
+  ControlPacketCoordinator coordinator(1000000000);
+  unsigned draws = 0;
+  const auto random = [&]{ ++draws; return 1.0; };
+  auto packet = controlBytes(0xd6,false);
+  auto stale = coordinator.handle({packet,0,1001999999},settings(),random);
+  ASSERT_EQ(stale.size(),2u); EXPECT_EQ(stale[1].kind,ControlEffectKind::stale);
+  EXPECT_EQ(stale[1].elapsedNs,1999999); EXPECT_EQ(draws,0u);
+  auto boundary = coordinator.handle({packet,0,1002000000},settings(),random);
+  ASSERT_EQ(boundary.size(),3u);
+  EXPECT_EQ(boundary[0].kind,ControlEffectKind::firstSentinel); EXPECT_FALSE(boundary[0].sentinel);
+  EXPECT_EQ(boundary[1].kind,ControlEffectKind::capturePeerIfAbsent);
+  EXPECT_EQ(boundary[2].kind,ControlEffectKind::retransmit);
+  EXPECT_EQ(boundary[2].bytes.data(),packet.data()+6);
+  EXPECT_EQ(boundary[2].bytes.size(),22u);
+  ControlPacketCoordinator sentinel(1000000000);
+  packet[0] = 0x10;
+  auto first = sentinel.handle({packet,0,999999999},settings(),random);
+  ASSERT_EQ(first.size(),4u); EXPECT_TRUE(first[1].sentinel);
+}
+TEST(ControlPacketCoordinator, FirstPacketCountAdvancesBeforeRandomDropAndZeroBypassesDraw) {
+  ControlPacketCoordinator coordinator(0);
+  auto packet = controlBytes();
+  auto live = settings(); live.dropFraction = 0.5;
+  unsigned draws = 0;
+  auto dropped = coordinator.handle({packet,0,0},live,[&]{ ++draws; return 0.5; });
+  ASSERT_EQ(dropped.size(),3u);
+  EXPECT_EQ(dropped[1].kind,ControlEffectKind::firstSentinel);
+  EXPECT_EQ(dropped[2].kind,ControlEffectKind::diagnosticDrop);
+  auto admitted = coordinator.handle({packet,0,0},live,[&]{ ++draws; return 0.500001; });
+  ASSERT_EQ(admitted.size(),2u); EXPECT_EQ(admitted[0].kind,ControlEffectKind::capturePeerIfAbsent);
+  EXPECT_EQ(draws,2u);
+  live.dropFraction = 0;
+  coordinator.handle({packet,0,0},live,[&]{ ++draws; return 0; });
+  EXPECT_EQ(draws,2u);
+}
+TEST(ControlPacketCoordinator, OnlyRealtimeTimeoutResetsCountAndRearmsFirstSentinel) {
+  ControlPacketCoordinator coordinator(0);
+  auto packet = controlBytes(); const auto random = []{ return 1.0; };
+  coordinator.handle({packet,0,0},settings(),random);
+  EXPECT_EQ(coordinator.handle({{},EAGAIN,1},settings(false),random).size(),0u);
+  auto still = coordinator.handle({packet,0,2},settings(),random);
+  ASSERT_EQ(still.size(),2u); EXPECT_EQ(still[0].kind,ControlEffectKind::capturePeerIfAbsent);
+  auto timeout = coordinator.handle({{},EAGAIN,3},settings(),random);
+  ASSERT_EQ(timeout.size(),1u); EXPECT_EQ(timeout[0].kind,ControlEffectKind::resetAnchor);
+  auto restarted = coordinator.handle({packet,0,4},settings(),random);
+  ASSERT_EQ(restarted.size(),3u); EXPECT_EQ(restarted[0].kind,ControlEffectKind::firstSentinel);
+}
