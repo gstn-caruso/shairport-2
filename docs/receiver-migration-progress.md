@@ -538,7 +538,7 @@ hold ordered effects without a heap-backed event list.
 Backend buffer and the session warning flag remain live per-packet inputs.
 An already-issued warning retains a negative calculated latency. The following
 timing-ownership slice replaces the original compatibility offset write; runtime
-peer ownership remains a migration gap. RTSP starts the control
+socket lifetime remains a migration gap. RTSP starts the control
 worker before optional input sample-rate setup, so finite zero-rate early anchors
 remain valid: normal stream latency stays 88200, with no warning/offset change.
 Zero-rate nonpositive warning diagnostics represent infinity/NaN explicitly while
@@ -613,6 +613,60 @@ The per-session warning flag and other compatibility configuration remain outsid
 this slice. Full cooperative worker shutdown, device acceptance, controlled
 performance measurement, and whole-goal completion remain open. No installation
 or live restart was performed.
+
+The resend ownership slice applies Feature Envy (#77) and Long Method (#82).
+`ResendCoordinator` owns the serialized request/backoff transaction in a
+standard-library component; its IO protocol supplies clock, random draw, and
+one eight-byte send result. `RemoteControlPeer` owns native address capture and
+owned snapshots behind its own mutex in a separate component. Both objects are
+embedded in `SessionState`; the raw peer address/length and failure timestamp
+are removed. No global owner or settings accessor is introduced.
+
+The runtime rejects inactive requests before reading the peer, takes one owned
+snapshot, and uses it throughout timeout setup and send. The original 100ms
+SO_SNDTIMEO failure diagnostic still occurs before send, and setup failure does
+not prevent sending. The coordinator preserves the D5 wire bytes, first sequence
+in big endian, count truncation to uint16, strict greater-than-300ms unsigned
+backoff, zero-timestamp sentinel, random equality dropping, and any non-minus-one
+send result clearing backoff, including zero and partial positive results.
+Failure errno is captured at send. Only `rtp_initialise` resets backoff in runtime.
+Synchronous IO must not reenter the coordinator; cancellation unwinds its RAII
+transaction lock without catching forced unwind.
+
+Peer capture accepts bounded IPv4/IPv6 native addresses and retains the first
+endpoint until clear. Snapshots preserve length and exact copied bytes, with
+unused storage initialized. Control cleanup closes the socket before clearing
+the peer. Native D7 and D6 traffic verifies first-peer retention, exact resend
+delivery, cleanup, and subsequent capture of a second endpoint. Standalone tests
+cover invalid native lengths/families, owned snapshot retention, concurrent
+capture/clear integrity, all backoff boundaries, serialized failures, and
+cancellation releasing the transaction lock. Runtime IO tests also verify early
+no-IO outcomes, timeout failure still sending, and initialization reset mapping.
+
+Before extraction, the actual native control handler and `rtp_request_resend`
+produced a recorded TSan peer-length capture/read race. The same native traffic
+regression now passes with the mutex-protected owner. This requires `fix`
+classification and the automated patch release expected v6.1.10; VERSION remains
+6.1.9 pending release automation. The Release baseline passes 606/606 in 17.85
+seconds; the final suite passes 619/619 in 17.99 seconds. ASan+UBSan passes 69/69
+focused cases in 2.09 seconds and TSan passes 69/69 in 2.83 seconds. Independent
+coordinator/peer executables link only their respective component and GoogleTest;
+both production objects contain both sanitizer profiles' instrumentation.
+Red/green, native race, full/focused, link, and instrumentation evidence remains
+under `/tmp/resend-ownership-*` for review.
+
+The initial post-extraction native socket-read cancellation fixture reported
+cleanup access warnings, preserved in `resend-ownership-native-cancellation-initial.log`.
+Peer snapshot and clear use the same mutex; LLVM 23.1.3 interceptor state after
+native cancellation remains a verification limitation. Borrowed control-fd
+lifetime and the plain `rtp_running` flag remain explicitly unfixed lifecycle
+gaps. The traffic fixture now handshakes at the existing `CancellationWait`
+cancellation point after actual UDP capture/send, without production changes or
+suppression. Existing native control/audio cancellation tests remain in the
+focused suite; this does not establish general concurrent socket-close safety.
+Retransmission range planning, full cooperative shutdown, device acceptance,
+performance measurement, and whole-goal completion remain outside this slice.
+No installation or live restart was performed.
 
 Each delivered PR received independent review and passed all four AMD64 CI
 configurations before merge. The Stage 1 work includes a non-silent stereo ALAC
