@@ -13,6 +13,8 @@
 #include <mutex>
 #include <vector>
 #include <cerrno>
+#include <future>
+#include <fcntl.h>
 #include "cancellation_wait.hpp"
 
 static CancellationWait *cancellation;
@@ -24,6 +26,10 @@ static bool scriptedIo = false;
 static uint64_t scriptedNow = 100;
 static unsigned sampledTimes = 0;
 static std::vector<int> sendEvents;
+static bool blockedSend = false;
+static std::mutex sendMutex;
+static std::condition_variable sendChanged;
+static bool sendEntered = false,releaseSend = false;
 extern "C" uint64_t __real_get_absolute_time_in_ns();
 extern "C" uint64_t __wrap_get_absolute_time_in_ns() {
   if (!scriptedIo) return __real_get_absolute_time_in_ns();
@@ -40,9 +46,35 @@ extern "C" int __wrap_setsockopt(int fd,int level,int option,const void *value,s
 }
 extern "C" ssize_t __real_sendto(int,const void *,size_t,int,const sockaddr *,socklen_t);
 extern "C" ssize_t __wrap_sendto(int fd,const void *bytes,size_t length,int flags,const sockaddr *peer,socklen_t peerLength) {
+  if (blockedSend) {
+    std::unique_lock lock(sendMutex);
+    sendEntered = true; sendChanged.notify_all();
+    sendChanged.wait(lock,[]{ return releaseSend; });
+    return 8;
+  }
   if (!scriptedIo) return __real_sendto(fd,bytes,length,flags,peer,peerLength);
   EXPECT_EQ(length,8u); EXPECT_EQ(peerLength,sizeof(sockaddr_in));
   sendEvents.push_back(2); errno = EPIPE; return -1;
+}
+
+void rtp_ap2_control_handler_cleanup_handler(void *);
+TEST(ResendRuntime, CleanupWaitsForAdmittedSendBeforeClosingDescriptor) {
+  SessionState session{};
+  const int descriptor = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
+  ASSERT_GE(descriptor,0);
+  ASSERT_EQ(session.controlChannel.adopt(descriptor),0);
+  session.controlChannel.activate();
+  sockaddr_in peer{}; peer.sin_family = AF_INET;
+  ASSERT_TRUE(session.remoteControlPeer.captureIfAbsent(reinterpret_cast<sockaddr *>(&peer),sizeof(peer)));
+  blockedSend = true; sendEntered = releaseSend = false;
+  std::thread sender([&]{ rtp_request_resend(1,1,&session); });
+  { std::unique_lock lock(sendMutex); ASSERT_TRUE(sendChanged.wait_for(lock,std::chrono::seconds(1),[]{ return sendEntered; })); }
+  auto closing = std::async(std::launch::async,[&]{ rtp_ap2_control_handler_cleanup_handler(&session); });
+  EXPECT_EQ(closing.wait_for(std::chrono::milliseconds(20)),std::future_status::timeout);
+  EXPECT_NE(fcntl(descriptor,F_GETFD),-1);
+  { std::lock_guard lock(sendMutex); releaseSend = true; }
+  sendChanged.notify_all(); sender.join(); closing.get(); blockedSend = false;
+  EXPECT_EQ(fcntl(descriptor,F_GETFD),-1);
 }
 extern "C" bool __real__ZN17RemoteControlPeer15captureIfAbsentEPK8sockaddrj(RemoteControlPeer *,const sockaddr *,socklen_t);
 extern "C" bool __wrap__ZN17RemoteControlPeer15captureIfAbsentEPK8sockaddrj(RemoteControlPeer *owner,const sockaddr *address,socklen_t length) {
@@ -63,16 +95,17 @@ TEST(ResendRuntime, NativeControlCaptureAndResendPreserveExactWireAndCleanup) {
   const double fraction = config.diagnostic_drop_packet_fraction;
   config.diagnostic_drop_packet_fraction = 0;
   SessionState session{};
-  session.rtp_running = 1;
   session.airplay_stream_type = buffered_stream;
-  session.ap2_control_socket = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
-  ASSERT_GE(session.ap2_control_socket,0);
+  const int descriptor = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
+  ASSERT_GE(descriptor,0);
   sockaddr_in address{};
   address.sin_family = AF_INET;
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  ASSERT_EQ(bind(session.ap2_control_socket,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
+  ASSERT_EQ(bind(descriptor,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
   socklen_t size = sizeof(address);
-  ASSERT_EQ(getsockname(session.ap2_control_socket,reinterpret_cast<sockaddr *>(&address),&size),0);
+  ASSERT_EQ(getsockname(descriptor,reinterpret_cast<sockaddr *>(&address),&size),0);
+  ASSERT_EQ(session.controlChannel.adopt(descriptor),0);
+  session.controlChannel.activate();
   const int client = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
   ASSERT_GE(client,0);
   ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
@@ -104,7 +137,7 @@ TEST(ResendRuntime, NativeControlCaptureAndResendPreserveExactWireAndCleanup) {
   config.diagnostic_drop_packet_fraction = fraction;
   ASSERT_TRUE(arrived);
   EXPECT_EQ(request,(std::array<uint8_t,8>{0x80,0xd5,0,1,0xcd,0xef,0x23,0x45}));
-  EXPECT_EQ(session.ap2_control_socket,-1);
+  EXPECT_FALSE(session.controlChannel.trySendLease());
   EXPECT_FALSE(session.remoteControlPeer.snapshot());
 }
 
@@ -113,18 +146,19 @@ TEST(ResendRuntime, D7AndD6KeepFirstPeerUntilCleanupThenAllowNewEndpoint) {
   cancellation = &waiting;
   { std::lock_guard lock(captureMutex); captures = 0; }
   SessionState session{};
-  session.rtp_running = 1;
   session.airplay_stream_type = buffered_stream;
   const double fraction = config.diagnostic_drop_packet_fraction;
   config.diagnostic_drop_packet_fraction = 0;
   const auto bindReceiver = [&] {
-    session.ap2_control_socket = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
-    EXPECT_GE(session.ap2_control_socket,0);
+    const int descriptor = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
+    EXPECT_GE(descriptor,0);
     sockaddr_in address{};
     address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    EXPECT_EQ(bind(session.ap2_control_socket,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
+    EXPECT_EQ(bind(descriptor,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
     socklen_t size = sizeof(address);
-    EXPECT_EQ(getsockname(session.ap2_control_socket,reinterpret_cast<sockaddr *>(&address),&size),0);
+    EXPECT_EQ(getsockname(descriptor,reinterpret_cast<sockaddr *>(&address),&size),0);
+    EXPECT_EQ(session.controlChannel.adopt(descriptor),0);
+    session.controlChannel.activate();
     return address;
   };
   auto address = bindReceiver();
@@ -164,7 +198,7 @@ TEST(ResendRuntime, D7AndD6KeepFirstPeerUntilCleanupThenAllowNewEndpoint) {
     waiting.waitForBlocked(blocked);
     EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0);
     finishAtObservableCancellation.store(false);
-    EXPECT_EQ(session.ap2_control_socket,-1);
+    EXPECT_FALSE(session.controlChannel.trySendLease());
     EXPECT_FALSE(session.remoteControlPeer.snapshot());
   };
   stopWorker(first,1);
@@ -191,7 +225,9 @@ TEST(ResendRuntime, TimeoutSetupFailureStillSendsAndInitialiseResetsFailureBacko
   SessionState session{};
   scriptedIo = true; sampledTimes = 0; sendEvents.clear(); scriptedNow = 100;
   rtp_request_resend(1,1,&session);
-  session.rtp_running = 1;
+  const int descriptor = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
+  ASSERT_EQ(session.controlChannel.adopt(descriptor),0);
+  session.controlChannel.activate();
   rtp_request_resend(1,1,&session);
   EXPECT_EQ(sampledTimes,0u); EXPECT_TRUE(sendEvents.empty());
   sockaddr_in peer{}; peer.sin_family = AF_INET;
@@ -202,7 +238,7 @@ TEST(ResendRuntime, TimeoutSetupFailureStillSendsAndInitialiseResetsFailureBacko
   rtp_request_resend(1,1,&session);
   EXPECT_EQ(sendEvents.size(),2u);
   rtp_initialise(&session);
-  session.rtp_running = 1;
+  session.controlChannel.activate();
   rtp_request_resend(1,1,&session);
   EXPECT_EQ(sendEvents,(std::vector<int>{1,2,1,2}));
   rtp_terminate(&session);

@@ -659,14 +659,74 @@ The initial post-extraction native socket-read cancellation fixture reported
 cleanup access warnings, preserved in `resend-ownership-native-cancellation-initial.log`.
 Peer snapshot and clear use the same mutex; LLVM 23.1.3 interceptor state after
 native cancellation remains a verification limitation. Borrowed control-fd
-lifetime and the plain `rtp_running` flag remain explicitly unfixed lifecycle
-gaps. The traffic fixture now handshakes at the existing `CancellationWait`
+lifetime and the plain `rtp_running` flag were explicit lifecycle gaps at this
+stage; the following control-channel slice removes both raw fields. The traffic
+fixture handshakes at the existing `CancellationWait`
 cancellation point after actual UDP capture/send, without production changes or
 suppression. Existing native control/audio cancellation tests remain in the
 focused suite; this does not establish general concurrent socket-close safety.
 Retransmission range planning, full cooperative shutdown, device acceptance,
 performance measurement, and whole-goal completion remain outside this slice.
 No installation or live restart was performed.
+
+The control datagram ownership slice applies Feature Envy (#77) and Long Method
+(#82). `ControlDatagramChannel` owns the UDP descriptor, eventfd wake, admission
+state, and counted operations. `SessionState` embeds the owner; the public raw
+control descriptor and `rtp_running` field are removed from all source/tests.
+Setup binds into a local descriptor and transfers it only after successful
+adoption; adoption failures close the caller's descriptor. The defaulted session
+constructor and existing player activation points remain unchanged.
+
+Resend acquires one admitted send lease before taking the owned peer snapshot.
+Receive also holds a lease, including before playback activation, preserving
+early anchors. Indefinite UDP readiness polling uses the descriptor and stop
+event together; nonblocking recv avoids a readiness/stop blocking race. A stop
+event exits the control loop before coordinator handling and does not fabricate
+an EAGAIN anchor reset or introduce a receive timeout. Player cleanup closes
+admission and signals stop at entry, while retaining existing worker cancellation
+and joins. Receiver cleanup closes the channel before clearing the peer.
+
+Close masks deferred cancellation, stops admission, wakes operations, waits for
+all leases, and closes both descriptors once. Native IO occurs outside the
+lifecycle mutex. The external contract requires the owner to outlive leases,
+holders to release before calling close, and the previous receiver to be joined
+before re-adoption. Arbitrarily retained tokens can delay close; this component
+does not promise to bound arbitrary user callbacks or the D6 audio sink.
+
+An actual old runtime regression admitted resend inside the wrapped native
+sendto, then observed cleanup complete and its captured descriptor already
+closed. It now verifies cleanup waits and the descriptor remains valid until
+the send releases its lease. Separate tests cover failed/double adoption,
+idempotent close, re-adoption, preactivation native peer/bytes, concurrent receive
+and send, indefinite receive wake, and actual native poll cancellation releasing
+its lease. A real D7 control worker publishes its early anchor and then joins
+normally after the stop event, without forced cancellation in that fixture.
+
+A separate deliberate fix retains SO_SNDTIMEO setup and its warning before send,
+but enforces a 100ms steady-clock budget even when setup fails. MSG_DONTWAIT
+send retries only would-block results through POLLOUT/stop polling; other native
+errors retain failure semantics. Stop returns ECANCELED; deadline expiry returns
+EAGAIN. Recorded red/green tests verify timeout-setup failure still has a bounded
+attempt, one blocking poll rather than a busy loop, and stop interrupts the
+would-block wait. Existing wire, backoff, partial-send, D6 authentication, and
+early-zero-rate D7 behavior remain covered. These lifecycle/budget fixes require
+`fix` classification and the automated patch release expected v6.1.11; VERSION
+remains 6.1.10 pending release automation.
+
+The Release baseline passes 619/619 in 17.89 seconds; the final suite passes
+630/630 in 18.28 seconds. ASan+UBSan passes 80/80 focused cases in 2.52 seconds,
+and TSan passes 80/80 in 3.40 seconds, including native poll cancellation and
+normal worker stop. Final source review also identified a transient wake-count
+leak if stop was cancelled inside eventfd write. The focused red timed out during
+close; a RAII wake lease now releases that operation on unwind, and the same
+regression passes in all three profiles. The independent transport executable links only the channel,
+native peer component, and GoogleTest; its production object contains both
+sanitizer profiles' instrumentation. Evidence remains under
+`/tmp/control-channel-*`; no new cancellation warnings were observed in these
+checks. This establishes these lease/IO paths, not general device shutdown.
+Whole-worker cooperative stopping, D6 downstream blocking, other socket owners,
+device acceptance, performance measurements, and whole-goal completion remain
+open. No installation or live restart was performed.
 
 Each delivered PR received independent review and passed all four AMD64 CI
 configurations before merge. The Stage 1 work includes a non-silent stereo ALAC

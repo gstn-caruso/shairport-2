@@ -8,8 +8,10 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <thread>
 #include <atomic>
+#include <future>
 
 extern "C" int __wrap_ptp_get_clock_info(uint64_t *id,uint64_t *sample,uint64_t *offset,uint64_t *mastership) {
   *id = 42; *sample = get_absolute_time_in_ns(); *offset = 0; *mastership = 0;
@@ -76,7 +78,7 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
   ASSERT_EQ(bind(descriptor,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
   socklen_t size = sizeof(address);
   ASSERT_EQ(getsockname(descriptor,reinterpret_cast<sockaddr *>(&address),&size),0);
-  session.ap2_control_socket = descriptor;
+  ASSERT_EQ(session.controlChannel.adopt(descriptor),0);
   const int client = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
   ASSERT_GE(client,0);
   ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
@@ -106,7 +108,7 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
     EXPECT_EQ(anchor.offset,negativeZero ? 0 : rate == 0 ? -10 : 0);
     EXPECT_EQ(anchor.warned,negativeZero || rate != 0 ? 1 : 0);
   }
-  EXPECT_EQ(session.ap2_control_socket,-1);
+  EXPECT_EQ(fcntl(descriptor,F_GETFD),-1);
   EXPECT_DOUBLE_EQ(readingSession.timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);
   auto later = SessionState::create(timing);
   EXPECT_DOUBLE_EQ(later->timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);
@@ -133,4 +135,32 @@ TEST(ControlPacketRuntime, ProductionClockConversionsObserveSharedOffsetBeforeAn
   EXPECT_EQ(time,1000000000000u);
   ASSERT_EQ(local_time_to_frame(1000000000000,&frame,session.get()),0);
   EXPECT_EQ(frame,100000u);
+}
+
+TEST(ControlPacketRuntime, ChannelStopWakesRealReceiverAndJoinsNormallyAfterEarlyAnchor) {
+  anchors.clear();
+  SessionState session{}; activeSession = &session;
+  const int fd = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
+  ASSERT_GE(fd,0);
+  sockaddr_in address{}; address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  ASSERT_EQ(bind(fd,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
+  socklen_t length = sizeof(address);
+  ASSERT_EQ(getsockname(fd,reinterpret_cast<sockaddr *>(&address),&length),0);
+  ASSERT_EQ(session.controlChannel.adopt(fd),0);
+  const int client = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
+  ASSERT_GE(client,0);
+  ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
+  pthread_t worker;
+  ASSERT_EQ(pthread_create(&worker,nullptr,rtp_ap2_control_receiver,&session),0);
+  const auto packet = controlTiming(100000,177175);
+  ASSERT_EQ(send(client,packet.data(),packet.size(),0),28);
+  { std::unique_lock lock(anchorMutex);
+    ASSERT_TRUE(anchorChanged.wait_for(lock,std::chrono::seconds(1),[]{ return anchors.size() == 1; })); }
+  session.controlChannel.deactivateAndRequestStop();
+  auto joining = std::async(std::launch::async,[&]{ void *result; return std::pair{pthread_join(worker,&result),result}; });
+  ASSERT_EQ(joining.wait_for(std::chrono::milliseconds(500)),std::future_status::ready);
+  auto joined = joining.get(); EXPECT_EQ(joined.first,0); EXPECT_EQ(joined.second,nullptr);
+  close(client); EXPECT_EQ(fcntl(fd,F_GETFD),-1);
+  EXPECT_FALSE(session.remoteControlPeer.snapshot());
 }
