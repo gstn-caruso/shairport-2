@@ -1,3 +1,9 @@
+## [6.1.15](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.14...v6.1.15) (2026-10-11)
+
+### Bug Fixes
+
+* **pairing:** own shared directory and reject invalid public keys safely ([#70](https://github.com/gstn-caruso/shairport-sync/issues/70)) ([21baa9f](https://github.com/gstn-caruso/shairport-sync/commit/21baa9fae989b1225a78dc17cbbb167e963a2d17))
+
 ## [6.1.14](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.13...v6.1.14) (2026-10-11)
 
 ### Bug Fixes
