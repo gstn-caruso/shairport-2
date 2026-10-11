@@ -9,6 +9,7 @@
 class EventPlaintextChannel {
 public:
   virtual ~EventPlaintextChannel() = default;
+  // IO reports -1 on error; read reports only initialized bytes within the supplied capacity.
   virtual std::ptrdiff_t write(std::span<const uint8_t> bytes) = 0;
   virtual std::ptrdiff_t read(std::span<uint8_t> bytes) = 0;
 };

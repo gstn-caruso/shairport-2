@@ -109,6 +109,8 @@ TEST(EventCommandExchange, SerializesCompleteWriteReadPairsBeforeSecondCommand) 
   auto first = std::async(std::launch::async,[&]{ return exchange.postBinaryCommand(firstBody,firstObserver); });
   { std::unique_lock lock(state->mutex); ASSERT_TRUE(state->changed.wait_for(lock,std::chrono::seconds(1),[&]{ return state->entered; })); }
   auto second = std::async(std::launch::async,[&]{ return exchange.postBinaryCommand(secondBody,secondObserver); });
+  EXPECT_EQ(second.wait_for(std::chrono::milliseconds(20)),std::future_status::timeout);
+  { std::lock_guard lock(state->mutex); EXPECT_EQ(state->sequence,(std::vector<std::string>{"write1"})); }
   { std::lock_guard lock(state->mutex); state->release = true; } state->changed.notify_all();
   EXPECT_EQ(first.get().count,0); EXPECT_EQ(second.get().count,0);
   EXPECT_EQ(state->sequence,(std::vector<std::string>{"write1","read1","write2","read2"}));

@@ -9,9 +9,26 @@
 #include <semaphore>
 #include <sys/wait.h>
 #include <netinet/in.h>
+#include <future>
+#include <atomic>
+#include "cancellation_wait.hpp"
 #include "protocol/ap2/ap2_event_receiver.h"
 
 static std::binary_semaphore updateInfoObserved{0};
+static int observedReadFd = -1;
+static std::atomic<bool> observeNativeRead{false};
+static std::promise<void> nativeReading;
+static CancellationWait encryptedReadCancellation;
+extern "C" ssize_t __real_read(int,void *,size_t);
+extern "C" ssize_t __wrap_read(int fd,void *bytes,size_t count) {
+  if (fd == observedReadFd && observeNativeRead.exchange(false)) {
+    nativeReading.set_value();
+#if __has_feature(thread_sanitizer)
+    encryptedReadCancellation.block();
+#endif
+  }
+  return __real_read(fd,bytes,count);
+}
 extern "C" ssize_t __wrap_ap2_event_send_update_info(rtsp_conn_info *) {
   updateInfoObserved.release(); return 0;
 }
@@ -98,4 +115,29 @@ TEST(EventCommandRuntime, BinaryPlistPostUsesRealEventCipherAcrossTwoTransaction
   ASSERT_EQ(received.size(),2u); EXPECT_EQ(received[0],expected); EXPECT_EQ(received[1],expected);
   session.eventCommandExchange.close(); close(sockets[1]);
   cipher.release(); peer.release();
+}
+
+TEST(EventCommandRuntime, CancellationDuringNativeEncryptedResponseUnlocksAndClosesBeforeCipherRelease) {
+  int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
+  SessionState session{}; pair_cipher_bundle peer{};
+  const std::array<uint8_t,32> key{};
+  auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
+  cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
+  peer.cipher_ctx = pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL,1,key.data(),key.size(),"");
+  ASSERT_NE(cipher.cipher_ctx,nullptr); ASSERT_NE(peer.cipher_ctx,nullptr);
+  ASSERT_TRUE(session.eventCommandExchange.attach(makeNativeEventChannel(sockets[0],cipher)));
+  auto reading = nativeReading.get_future(); observedReadFd = sockets[0]; observeNativeRead = true;
+  pthread_t worker;
+  ASSERT_EQ(pthread_create(&worker,nullptr,[](void *context)->void * {
+    auto command = plist_new_string("ordinary command");
+    std::unique_ptr<std::remove_pointer_t<plist_t>,decltype(&plist_free)> owned(command,plist_free);
+    ap2_event_port_post_command(static_cast<SessionState *>(context),owned.get()); return nullptr;
+  },&session),0);
+  ASSERT_EQ(reading.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  std::array<uint8_t,4096> request{};
+  EXPECT_GT(read_encrypted(sockets[1],&peer,request.data(),request.size()),0);
+  EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0);
+  session.eventCommandExchange.close(); EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1);
+  EXPECT_NE(cipher.cipher_ctx,nullptr);
+  cipher.release(); peer.release(); close(sockets[1]); observedReadFd = -1;
 }
