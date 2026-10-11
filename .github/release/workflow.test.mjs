@@ -8,6 +8,32 @@ const workflow = yaml.load(readFileSync(new URL('../workflows/receiver.yml', imp
 const build = workflow.jobs.reference;
 const toolchain = yaml.load(readFileSync(new URL('../actions/setup-toolchain/action.yml', import.meta.url), 'utf8'));
 
+test('workflow actions use Node.js 24 releases, including the shared compiler cache', () => {
+  const versions = new Map([
+    ['actions/checkout', 'v6'],
+    ['actions/setup-node', 'v6'],
+    ['actions/cache', 'v5'],
+    ['actions/upload-artifact', 'v6'],
+    ['actions/download-artifact', 'v7']
+  ]);
+  const steps = [...Object.values(workflow.jobs).flatMap(job => job.steps), ...toolchain.runs.steps];
+  for (const step of steps.filter(step => step.uses?.startsWith('actions/'))) {
+    const [action, version] = step.uses.split('@');
+    assert.equal(version, versions.get(action), step.uses);
+  }
+});
+
+test('runner hosts stay on Ubuntu 24.04 while the build container stays on Ubuntu 26.04', () => {
+  for (const job of Object.values(workflow.jobs)) {
+    if (job.strategy?.matrix.platform) {
+      for (const platform of job.strategy.matrix.platform) assert.equal(platform.runner, 'ubuntu-24.04');
+    } else {
+      assert.equal(job['runs-on'], 'ubuntu-24.04');
+    }
+  }
+  assert.equal(build.container, 'ubuntu:26.04');
+});
+
 test('workflow checks advertise their purpose without changing job dependencies', () => {
   assert.equal(workflow.name, 'Build, validate and release');
   assert.equal(workflow.jobs.plan.name, 'Plan release version');
@@ -70,7 +96,7 @@ test('PRs validate without publication and publication requires successful valid
   const freshness = publication.steps.find(step => step.id === 'freshness');
   assert.match(freshness.run, /git rev-parse FETCH_HEAD/);
   for (const step of publication.steps.filter(step => step.name !== freshness.name &&
-    (step.uses === 'actions/download-artifact@v4' || step.uses === 'actions/setup-node@v4' || step.run))) {
+    (step.uses?.startsWith('actions/download-artifact@') || step.uses?.startsWith('actions/setup-node@') || step.run))) {
     if (step.if !== 'failure()') assert.equal(step.if, "steps.freshness.outputs.current == 'true'");
   }
   assert.ok(publication.steps.every(step => !/cmake|cpack/.test(step.run ?? '')));
