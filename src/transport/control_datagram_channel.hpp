@@ -23,6 +23,7 @@ public:
     SendLease &operator=(SendLease &&other) noexcept;
     ~SendLease();
     explicit operator bool() const { return owner_ != nullptr; }
+    // IO requires a non-empty lease; the owner must remain alive throughout its scope.
     int setResendTimeout();
     ControlSendResult sendTo(std::span<const uint8_t> bytes,const RemoteControlPeerSnapshot &peer);
   private:
