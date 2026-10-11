@@ -20,6 +20,8 @@ public:
   EventPortWorker() = default;
   ~EventPortWorker();
   // Start consumes the bound descriptor on every outcome. The exchange outlives the worker.
+  // Factory consumes each accepted descriptor, including on failure. Dependencies outlive stop;
+  // callbacks must not throw or invoke stop on this worker's own thread.
   std::expected<void,int> start(int boundFd,EventCommandExchange &exchange,
                               ChannelFactory factory,std::function<void()> initialCommand);
   int stop();
@@ -29,6 +31,9 @@ private:
   std::condition_variable joined_;
   std::jthread thread_;
   EventCommandExchange *exchange_ = nullptr;
+  ChannelFactory factory_;
+  std::function<void()> initial_;
+  std::shared_ptr<EventChannelInterrupt> interrupt_;
   int listener_ = -1,wake_ = -1,error_ = 0;
   bool stopping_ = false,joining_ = false;
 };
