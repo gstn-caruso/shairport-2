@@ -948,6 +948,22 @@ cancellation fixture retains the previously documented TSan-only
 Final logs are `/tmp/encrypted-channel-final-release.log` and
 `/tmp/encrypted-channel-{asan,tsan}.log`.
 
+Independent review identified direct SessionState destruction as a second
+lifetime path: member ordering destroyed the new cipher owners before the
+event worker's member destructor could join its callback. The focused native
+regression destroys an active session during an encrypted reply read and
+intercepts cipher free to require callback completion and accepted-descriptor
+closure first. Both observations fail on the previous implementation
+(`/tmp/encrypted-channel-destruction-red.log`). The SessionState destructor now
+stops/joins the event worker and closes the exchange before any member teardown,
+also protecting the callback's other borrowed session state. Its defaulted
+constructor and value-initialization contract remain unchanged.
+
+The review follow-up passes 669 full Release tests (18.57 seconds) and the same
+focused regex now passes 40 ASan+UBSan and 40 TSan cases. This new native
+destruction fixture uses cooperative interruption without `CancellationWait`.
+Evidence is `/tmp/encrypted-channel-destruction-{release,asan,tsan}.log`.
+
 This fixes the released-output double free (expected patch v6.1.14 through
 release automation). Broader pairing/handshake ownership, live Home/device
 acceptance, other worker cancellation, and performance measurements remain
