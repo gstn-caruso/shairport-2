@@ -83,14 +83,16 @@ Do not substitute a `clang-scan-deps` from another LLVM version. Validation scop
 and native-cancellation limitations are recorded in the
 [architecture guide](docs/architecture.md#validation).
 
-CI runs native amd64 CMake Release, Debug, ASan+UBSan and TSan builds,
+CI runs three native AMD64 CMake builds: Release, ASan+UBSan and TSan,
 all with the same pinned compiler and library. Every build runs its contracts,
 including companion timing, lifecycle and real socket/receiver-reader tests,
-and stages both binaries, units, licenses, manual and sample configuration
+while only Release stages both binaries, units, licenses, manual and sample
+configuration, verifies installation, builds the Debian package and uploads it
 without starting a service. The sanitizer jobs check instrumentation in receiver
 and companion runtime/packet-handler C++ object files. TSan
 detects data races between threads; ASan detects memory misuse and UBSan detects
-undefined behavior. All four builds must pass before a release can publish.
+undefined behavior. All three builds and release-automation checks must pass
+before a release can publish.
 ARM64 CI and release artifacts are suspended for now.
 Failed tests upload CTest diagnostics, and an empty test selection fails CI.
 

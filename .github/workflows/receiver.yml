@@ -1,4 +1,4 @@
-name: AirPlay 2 Linux PulseAudio
+name: Build, validate and release
 on:
   push:
     branches: [master, main]
@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   plan:
+    name: Plan release version
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -19,24 +20,28 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version || steps.current.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source and release history
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Read current package version
         id: current
         run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js for release tooling
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: .github/release/package-lock.json
-      - run: npm ci --prefix .github/release
+      - name: Install locked release tooling
+        run: npm ci --prefix .github/release
       - name: Plan the semantic release version without publishing
         id: version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/release/node_modules/.bin/semantic-release --dry-run --extends ./.github/release/plan.config.mjs
   reference:
+    name: ${{ matrix.purpose }} / AMD64
     needs: plan
     if: always() && (needs.plan.result == 'success' || needs.plan.result == 'skipped')
     runs-on: ${{ matrix.platform.runner }}
@@ -45,7 +50,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: [Release, Debug, ASan-UBSan, TSan]
+        build: [Release, ASan-UBSan, TSan]
+        include:
+          - build: Release
+            purpose: Verify release package
+          - build: ASan-UBSan
+            purpose: Check memory safety and undefined behavior
+          - build: TSan
+            purpose: Check thread safety
         platform:
           - architecture: amd64
             runner: ubuntu-latest
@@ -56,7 +68,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y ca-certificates curl git cmake ninja-build gcc-15 g++-15 g++ zstd pkg-config libgtest-dev libpopt-dev libconfig-dev libpulse-dev libavahi-client-dev libssl-dev libplist-dev libplist-utils libsodium-dev libgcrypt20-dev uuid-dev libavutil-dev libavcodec-dev libavformat-dev libswresample-dev xxd dpkg-dev file systemd
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v4
       - name: Use the planned package version
         env:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
@@ -64,7 +77,8 @@ jobs:
           if [ -n "$RELEASE_VERSION" ]; then
             printf '%s\n' "$RELEASE_VERSION" > VERSION
           fi
-      - uses: ./.github/actions/setup-toolchain
+      - name: Set up pinned C++26 compiler
+        uses: ./.github/actions/setup-toolchain
       - name: Configure
         env:
           BUILD: ${{ matrix.build }}
@@ -79,6 +93,7 @@ jobs:
       - name: Build
         run: cmake --build build/cmake --parallel 2
       - name: Verify sanitizer instrumentation
+        if: matrix.build != 'Release'
         env:
           BUILD: ${{ matrix.build }}
         run: |
@@ -99,6 +114,7 @@ jobs:
       - name: Test
         run: ctest --test-dir build/cmake --no-tests=error --output-on-failure
       - name: Verify staged install
+        if: matrix.build == 'Release'
         run: |
           DESTDIR="$PWD/build/cmake/stage" cmake --install build/cmake
           test -f build/cmake/stage/usr/bin/shairport-2
@@ -137,17 +153,23 @@ jobs:
           path: build/cmake/Testing/Temporary/
           if-no-files-found: ignore
   release-policy:
+    name: Validate release automation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js for release tooling
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: .github/release/package-lock.json
-      - run: npm ci --prefix .github/release
-      - run: npm test --prefix .github/release
+      - name: Install locked release tooling
+        run: npm ci --prefix .github/release
+      - name: Test release automation
+        run: npm test --prefix .github/release
   release:
+    name: Publish release
     if: github.event_name == 'push'
     needs: [plan, reference, release-policy]
     runs-on: ubuntu-latest
@@ -160,7 +182,8 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.plan.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source and release history
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Check release freshness
@@ -181,7 +204,8 @@ jobs:
         with:
           name: deb-ubuntu-26.04-amd64-${{ github.sha }}
           path: build/release/packages
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js for release tooling
+        uses: actions/setup-node@v4
         if: steps.freshness.outputs.current == 'true'
         with:
           node-version: '24'

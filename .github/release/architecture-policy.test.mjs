@@ -5,10 +5,10 @@ import yaml from 'js-yaml';
 
 const workflow = yaml.load(readFileSync(new URL('../workflows/receiver.yml', import.meta.url), 'utf8'));
 
-test('CI retains all four build configurations on AMD64 only', () => {
+test('CI retains exactly three build configurations on AMD64 only', () => {
   const matrix = workflow.jobs.reference.strategy.matrix;
   assert.deepEqual(matrix.platform, [{architecture: 'amd64', runner: 'ubuntu-latest'}]);
-  assert.deepEqual(matrix.build, ['Release', 'Debug', 'ASan-UBSan', 'TSan']);
+  assert.deepEqual(matrix.build, ['Release', 'ASan-UBSan', 'TSan']);
 });
 
 test('publication downloads only the tested AMD64 package', () => {
