@@ -9,6 +9,7 @@ extern "C" {
 #include "pair_ap/pair.h"
 }
 
+// Returned positive counts must fit the supplied span; spans are borrowed only for the call.
 class EncryptedByteIo {
 public:
   virtual ~EncryptedByteIo() = default;
@@ -22,7 +23,8 @@ public:
   virtual void encryptFailed(std::string_view message) = 0;
 };
 
-// Callers serialize IO and release; IO and diagnostic callbacks must not reenter.
+// Callers serialize IO and release; read/write require a prepared channel.
+// IO and diagnostic callbacks must not reenter or retain borrowed views.
 class EncryptedChannel {
 public:
   EncryptedChannel() = default;
