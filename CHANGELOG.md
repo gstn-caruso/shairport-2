@@ -1,3 +1,9 @@
+## [6.1.14](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.13...v6.1.14) (2026-10-11)
+
+### Bug Fixes
+
+* **pairing:** own encrypted channel state and release failed outputs safely ([#69](https://github.com/gstn-caruso/shairport-sync/issues/69)) ([14109b2](https://github.com/gstn-caruso/shairport-sync/commit/14109b273f76302cced4871736b4a554eacc93b1))
+
 ## [6.1.13](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.12...v6.1.13) (2026-10-11)
 
 ### Bug Fixes
