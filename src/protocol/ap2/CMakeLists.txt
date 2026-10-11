@@ -1,5 +1,5 @@
 target_sources(receiver PRIVATE
-  ap2_buffered_audio_processor.cpp ap2_event_receiver.cpp ap2_event_message_handler.cpp)
+  ap2_buffered_audio_processor.cpp ap2_event_receiver.cpp ap2_event_message_handler.cpp native_event_channel.cpp)
 add_library(receiver-buffered-flush STATIC buffered_flush_policy.cpp)
 target_include_directories(receiver-buffered-flush PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_compile_options(receiver-buffered-flush PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
@@ -24,3 +24,7 @@ target_compile_options(receiver-buffered-coordinator PRIVATE -Wall -Wextra -Wsha
 target_link_libraries(receiver-buffered-coordinator PUBLIC receiver-buffered-block receiver-buffered-playback receiver-audio-format)
 target_link_libraries(receiver PUBLIC receiver-buffered-coordinator)
 set_source_files_properties(ap2_buffered_audio_processor.cpp TARGET_DIRECTORY receiver PROPERTIES CXX_SCAN_FOR_MODULES ON)
+add_library(receiver-event-command STATIC event_command_exchange.cpp)
+target_include_directories(receiver-event-command PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(receiver-event-command PUBLIC Threads::Threads)
+target_link_libraries(receiver PUBLIC receiver-event-command)

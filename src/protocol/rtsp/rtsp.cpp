@@ -2562,6 +2562,7 @@ void rtsp_conversation_thread_cleanup_function(void *arg) {
           conn->connection_number);
 
     conn->ap2_pairing_context.control_cipher_bundle.release();
+    conn->eventCommandExchange.close();
     conn->ap2_pairing_context.event_cipher_bundle.release();
     conn->ap2_pairing_context.data_cipher_bundle.release();
 
@@ -2592,10 +2593,6 @@ void rtsp_conversation_thread_cleanup_function(void *arg) {
     int rc = pthread_mutex_destroy(&conn->flush_mutex);
     if (rc)
       debug(1, "Connection %d: error %d destroying flush_mutex.", conn->connection_number, rc);
-    rc = pthread_mutex_destroy(&conn->event_sender_mutex);
-    if (rc)
-      debug(1, "Connection %d: error %d destroying event_sender_mutex.", conn->connection_number,
-            rc);
     debug(3, "Connection %d: Closed.", conn->connection_number);
     sessions.markFinished(conn->connection_number);
     pthread_setcancelstate(oldState, NULL);
@@ -2615,9 +2612,6 @@ static void *rtsp_conversation_thread_func(void *pconn) {
   int rc = pthread_mutex_init(&conn->flush_mutex, NULL);
   if (rc)
     die("Connection %d: error %d initialising flush_mutex.", conn->connection_number, rc);
-  rc = pthread_mutex_init(&conn->event_sender_mutex, NULL);
-  if (rc)
-    die("Connection %d: error %d initialising event_sender_mutex.", conn->connection_number, rc);
 
   // nothing before this is cancellable
   pthread_cleanup_push(rtsp_conversation_thread_cleanup_function, (void *)conn);

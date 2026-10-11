@@ -728,6 +728,82 @@ Whole-worker cooperative stopping, D6 downstream blocking, other socket owners,
 device acceptance, performance measurements, and whole-goal completion remain
 open. No installation or live restart was performed.
 
+The event command exchange slice applies Long Method (#82) and Feature Envy
+(#77). `EventCommandExchange` owns the accepted plaintext channel and serializes
+complete command write/read pairs behind its standard mutex. Its independently
+linked ordinary-header component depends only on the standard library and
+Threads. It frames the exact POST /command headers and binary body, returns
+legacy signed counts plus typed status, and owns up to 4096 reply bytes.
+Typed diagnostics execute at the original points inside the transaction;
+observers must not reenter or retain their borrowed reply view.
+
+Missing channels return -1 without IO. Short/error writes return -1 without a
+read; complete writes perform one read, preserving EOF zero, error minus one,
+binary NUL bytes, and single-read native cipher behavior. Native encrypted reads
+may return split chunks; the component does not aggregate or parse RTSP replies.
+The full 4096-byte reply is verified through the initialized plaintext port.
+The original packet[count] terminator could index beyond its 4096-byte buffer;
+the separate fix uses bounded logging and the exchange uses owned byte views,
+with no terminator write. Text diagnostics still stop at the first NUL.
+
+Runtime retains libplist serialization, informational dictionaries, existing
+HomeKit cipher functions, and diagnostic formatting. `NativeEventChannel` owns
+only its accepted descriptor and borrows the session's event cipher bundle.
+Its local descriptor guard retains ownership if allocation fails, rejected
+attachment destroys the candidate, and deferred cancellation is masked during
+descriptor destruction. Destruction never accesses the borrowed cipher. The
+receiver accepts locally, attaches the first channel, invokes updateInfo, and
+closes the exchange before existing group/remote cleanup. RTSP joins the event
+receiver and closes the exchange before releasing the event cipher bundle.
+SessionState's raw event descriptor/mutex and RTSP init/destroy calls are removed.
+
+The actual receiver child fixture failed against the legacy positive-only accept
+condition and now verifies valid descriptor zero reaches attach/updateInfo and
+is closed by cleanup. Normal real channel-4/channel-1 HomeKit socketpair tests
+verify two consecutive commands with a frozen binary-plist body and exact wire
+headers, preserving cipher counter state and returned counts. Core cases cover
+framing, failure rows, initialized binary/full replies, pair serialization,
+first-owner retention, close ownership, and transaction cancellation unwind.
+
+An actual native response-read cancellation fixture passes in Release and
+ASan+UBSan: after the sender joins, an independent thread acquires the exchange
+through close and closes the accepted fd before cipher release. Initial native
+TSan instead reported a double-lock at close, even though the functional close
+completed. That report is preserved in
+`/tmp/event-command-native-cancellation-tsan-initial.log`. Only TSan uses the
+existing CancellationWait seam at that read cancellation point; production is
+unchanged and no warning is suppressed. Its passing result is seam-based,
+not clean native-read cancellation TSan evidence. The native TSan unwind
+observation remains a tooling/verification limitation; Release/ASan independent
+acquisition establishes that the actual mutex is released on these paths.
+
+The Release baseline passes 630/630 in 18.04 seconds; the final suite passes
+644/644 in 18.29 seconds. ASan+UBSan passes 64/64 focused cases in 2.92 seconds
+and TSan passes 64/64 in 3.70 seconds with the stated cancellation seam. The
+independent executable links only the exchange component and GoogleTest; the
+production object contains both sanitizer profiles' instrumentation. Logs under
+`/tmp/event-command-*` retain boundary/descriptor-zero evidence, native golden,
+independent close, full/focused checks, link, and instrumentation. The fixes
+require `fix` classification and automated patch release expected v6.1.12;
+VERSION remains 6.1.11 pending release automation.
+
+The review follow-up enables the actual runtime reply diagnostic at debug level
+3 through `ap2_event_port_post_command`, using an initialized 4096-byte plaintext
+reply. It verifies the returned count and exactly bounded output, then verifies
+that an embedded NUL still clips diagnostic text without changing the count.
+Temporarily restoring unbounded `%s` logging produced an ASan read of 4097 bytes
+past the reply allocation; the original production source was restored
+byte-for-byte afterward. Evidence is retained in
+`/tmp/event-command-review-asan-red-report.2366636` and the review green logs.
+All 15 event-focused cases pass in Release, ASan+UBSan, and TSan with the existing
+cancellation limitation stated above. Full Release now passes 645/645 in 18.33
+seconds. This follow-up changes only the test and this evidence record.
+
+Close may wait on blocking IO as the old mutex did; cancellation and joins are
+still required. Event listener/thread ownership, complete cooperative shutdown,
+runtime info/global settings, device acceptance, performance measurement, and
+whole-goal completion remain open. No installation or live restart was performed.
+
 Each delivered PR received independent review and passed all four AMD64 CI
 configurations before merge. The Stage 1 work includes a non-silent stereo ALAC
 fixture comparing every decoded sample; a temporary left/right decoder-plane

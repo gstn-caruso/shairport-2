@@ -29,7 +29,6 @@
 #include "runtime/common.h"
 #include "protocol/rtsp/rtsp.h"
 #include "platform/utilities/generate_random_uuid.h"
-#include "platform/utilities/structured_buffer.h"
 
 void decodeAndLogPlist(plist_t plist_to_log) {
   if (plist_to_log != NULL) {
@@ -41,70 +40,48 @@ void decodeAndLogPlist(plist_t plist_to_log) {
   }
 }
 
-// will return -1 if there is an error or port is not open, 0 if the port was closed and a positive
-// number if okay
-ssize_t ap2_event_port_send_message(rtsp_conn_info *conn, char *data, size_t data_length) {
-  ssize_t result = -1; // assume a problem
-  pthread_mutex_lock(&conn->event_sender_mutex);
-  pthread_cleanup_push(mutex_unlock, &conn->event_sender_mutex);
-  if (conn->event_channel_fd != 0) {
-    result = write_encrypted(conn->event_channel_fd, &conn->ap2_pairing_context.event_cipher_bundle,
-                             data, data_length);
-    if ((result != -1) && ((size_t)result == data_length)) {
-      debug(3, "Connection %d: Packet of %zu bytes successfully written on the Event Port.",
-            conn->connection_number, result);
-      uint8_t packet[4096];
-      result =
-          read_encrypted(conn->event_channel_fd, &conn->ap2_pairing_context.event_cipher_bundle,
-                         packet, sizeof(packet));
-      debug(3, "Connection %d: Packet of %zu bytes successfully read on the Event Port.",
-            conn->connection_number, result);
-      if (result > 0) {
-        packet[result] = '\0';
-        debug(3, "Connection %d: Packet Received on Event Port with contents: \n--\n%s\n--\n",
-              conn->connection_number, packet);
-      } else {
-        debug(2, "Connection %d: Event Port connection closed by client", conn->connection_number);
-      }
-    } else {
-      result = -1; // this covers a situation where the result is positive but not the same as the
-                   // data_length
+class RuntimeEventObserver final : public EventObserver {
+public:
+  explicit RuntimeEventObserver(int connection) : connection_(connection) {}
+  void observe(const EventDiagnostic &event) override {
+    switch (event.kind) {
+    case EventDiagnosticKind::notOpen:
+      debug(1,"Connection %d: attempt to send a command to the event port over a closed socket",connection_);
+      break;
+    case EventDiagnosticKind::written:
+      debug(3,"Connection %d: Packet of %zu bytes successfully written on the Event Port.",
+            connection_,static_cast<size_t>(event.count));
+      break;
+    case EventDiagnosticKind::read:
+      debug(3,"Connection %d: Packet of %zu bytes successfully read on the Event Port.",
+            connection_,static_cast<size_t>(event.count));
+      break;
+    case EventDiagnosticKind::reply:
+      debug(3,"Connection %d: Packet Received on Event Port with contents: \n--\n%.*s\n--\n",
+            connection_,static_cast<int>(event.bytes.size()),reinterpret_cast<const char *>(event.bytes.data()));
+      break;
+    case EventDiagnosticKind::closed:
+      debug(2,"Connection %d: Event Port connection closed by client",connection_);
+      break;
     }
-  } else {
-    debug(1, "Connection %d: attempt to send a command to the event port over a closed socket",
-          conn->connection_number);
   }
-  pthread_cleanup_pop(1); // unlock the mutex
-  return result;
-}
+private:
+  int connection_;
+};
 
-ssize_t ap2_event_port_post_command(rtsp_conn_info *conn, plist_t command) {
-  ssize_t result = 0;
+ssize_t ap2_event_port_post_command(rtsp_conn_info *conn,plist_t command) {
   decodeAndLogPlist(command);
-  structured_buffer *sbuf = sbuf_new(4096);
-  if (sbuf != NULL) {
-    pthread_cleanup_push(sbuf_cleanup, sbuf);
-    char *plistString = NULL;
-    uint32_t plistStringLength = 0;
-
-    plist_to_bin(command, &plistString, &plistStringLength);
-    if (plistString != NULL) {
-      sbuf_printf(sbuf, "POST /command RTSP/1.0\r\nContent-Length: %u\r\n", plistStringLength);
-      sbuf_printf(sbuf, "Content-Type: application/x-apple-binary-plist\r\n\r\n");
-      sbuf_append(sbuf, plistString, plistStringLength);
-      free(plistString); // should be plist_to_bin_free, but it's not defined in older
-                         // libraries
-      char *b = 0;
-      size_t l = 0;
-      sbuf_buf_and_length(sbuf, &b, &l);
-      result = ap2_event_port_send_message(conn, b, l);
-      debug(3, "Connection %d: POST /command sent on the event port. Result is %zd.",
-            conn->connection_number, result);
-      sbuf_clear(sbuf);
-    }
-    pthread_cleanup_pop(1); // delete the structured buffer
-  }
-  return result;
+  char *encoded = nullptr;
+  uint32_t length = 0;
+  plist_to_bin(command,&encoded,&length);
+  std::unique_ptr<char,decltype(&std::free)> binary(encoded,std::free);
+  if (!binary) return 0;
+  RuntimeEventObserver observer(conn->connection_number);
+  const auto result = conn->eventCommandExchange.postBinaryCommand(
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(binary.get()),length),observer);
+  debug(3,"Connection %d: POST /command sent on the event port. Result is %zd.",
+        conn->connection_number,result.count);
+  return result.count;
 }
 
 ssize_t ap2_event_send_update_info(rtsp_conn_info *conn) {
