@@ -29,14 +29,10 @@
 #include "protocol/ap2/ap2_event_message_handler.h"
 #include "protocol/ap2/native_event_channel.hpp"
 #include "runtime/common.h"
-#include "playback/player.h"
-#include "platform/utilities/network_utilities.h"
 
 
-void ap2_event_receiver_cleanup_handler(void *arg) {
-  rtsp_conn_info *conn = (rtsp_conn_info *)arg;
-  // debug(1, "Connection %d: AP2 Event Receiver Cleanup start.", conn->connection_number);
-  conn->eventCommandExchange.close();
+void stop_ap2_event_worker(SessionState *conn) {
+  conn->eventPortWorker.stop();
 
   if (conn->airplay_gid != NULL) {
     free(conn->airplay_gid);
@@ -50,37 +46,12 @@ void ap2_event_receiver_cleanup_handler(void *arg) {
   debug(2, "Connection %d: AP2 Event Receiver Cleanup is complete.", conn->connection_number);
 }
 
-void *ap2_event_receiver(void *arg) {
-  rtsp_conn_info *conn = (rtsp_conn_info *)arg;
-  debug(2, "Connection %d: AP2 Event Receiver started", conn->connection_number);
-  SOCKADDR remote_addr;
-  memset(&remote_addr, 0, sizeof(remote_addr));
-  socklen_t addr_size = sizeof(remote_addr);
-
-  const int accepted =
-      eintr_checked_accept(conn->event_socket, (struct sockaddr *)&remote_addr, &addr_size);
-  if (accepted >= 0 && conn->eventCommandExchange.attach(
-          makeNativeEventChannel(accepted,conn->ap2_pairing_context.event_cipher_bundle))) {
-    debug(2,
-          "Connection %d: ap2_event_receiver accepted a connection on socket %d and moved to a new "
-          "socket %d.",
-          conn->connection_number, conn->event_socket, accepted);
-    pthread_cleanup_push(ap2_event_receiver_cleanup_handler, arg);
-
-    ap2_event_send_update_info(conn);
-
-    while (1) {
-      usleep(100000);
-    };
-
-    debug(3, "Connection %d: AP2 Event Receiver RTP thread starting \"normal\" exit.",
-          conn->connection_number);
-    pthread_cleanup_pop(1); // do the cleanup
-  } else {
-    debug(1, "Connection %d: could not accept an event socket", conn->connection_number);
-  }
-  debug(2, "Connection %d: AP2 Event Receiver RTP thread \"normal\" exit.",
-        conn->connection_number);
-  conn->ap2_event_receiver_exited = 1;
-  pthread_exit(NULL);
+std::expected<void,int> start_ap2_event_worker(SessionState *conn,int listener) {
+  return conn->eventPortWorker.start(listener,conn->eventCommandExchange,
+      [conn](int accepted) {
+        return makeInterruptibleNativeEventChannel(accepted,conn->ap2_pairing_context.event_cipher_bundle);
+      },[conn] {
+        debug(2,"Connection %d: AP2 Event Receiver accepted a connection",conn->connection_number);
+        ap2_event_send_update_info(conn);
+      });
 }

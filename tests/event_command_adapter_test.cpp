@@ -38,18 +38,16 @@ static int receiverWithDescriptorZero() {
   const int listener = socket(AF_INET,SOCK_STREAM,0),client = socket(AF_INET,SOCK_STREAM,0);
   if (listener < 0 || client < 0) return 10;
   sockaddr_in address{}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)) || listen(listener,1)) return 11;
+  if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address))) return 11;
   socklen_t length = sizeof(address);
-  if (getsockname(listener,reinterpret_cast<sockaddr *>(&address),&length) ||
-      connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address))) return 12;
-  SessionState session{}; session.event_socket = listener;
+  if (getsockname(listener,reinterpret_cast<sockaddr *>(&address),&length)) return 12;
+  SessionState session{};
+  if (!start_ap2_event_worker(&session,listener)) return 13;
   close(STDIN_FILENO);
-  pthread_t worker;
-  if (pthread_create(&worker,nullptr,ap2_event_receiver,&session)) return 13;
+  if (connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address))) return 12;
   const bool observed = updateInfoObserved.try_acquire_for(std::chrono::milliseconds(500));
-  if (observed) pthread_cancel(worker);
-  pthread_join(worker,nullptr);
-  close(listener); close(client);
+  stop_ap2_event_worker(&session);
+  close(client);
   return observed && fcntl(STDIN_FILENO,F_GETFD) == -1 ? 0 : 14;
 }
 

@@ -11,6 +11,7 @@
 #include "transport/remote_control_peer.hpp"
 #include "transport/control_datagram_channel.hpp"
 #include "protocol/ap2/event_command_exchange.hpp"
+#include "transport/event_port_worker.hpp"
 #include "audio/decoding/audio_decoder.hpp"
 #include "audio/format/audio_input_state.hpp"
 #include "audio/resampling/resampler.hpp"
@@ -100,14 +101,12 @@ struct SessionState : PrincipalParticipant {
                      // the pi UUID
   airplay_stream_t airplay_stream_type; // is it realtime audio or buffered audio...
 
-  pthread_t *rtp_event_thread;
   pthread_t *rtp_data_thread;
   pthread_t rtp_ap2_control_thread;
   pthread_t rtp_realtime_audio_thread;
   pthread_t rtp_buffered_audio_thread;
   EventCommandExchange eventCommandExchange;
-
-  int ap2_event_receiver_exited;
+  EventPortWorker eventPortWorker;
 
   BufferedFlushPolicy bufferedFlush;
 
@@ -119,7 +118,6 @@ struct SessionState : PrincipalParticipant {
   ap2_pairing ap2_pairing_context;
   struct pair_result *pair_setup_result; // need to keep the shared secret
 
-  int event_socket;
   int data_socket;
   RemoteControlPeer remoteControlPeer;
   int realtime_audio_socket;
