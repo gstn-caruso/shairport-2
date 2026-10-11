@@ -1,3 +1,9 @@
+## [6.1.9](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.8...v6.1.9) (2026-10-11)
+
+### Bug Fixes
+
+* **timing:** own shared RTP settings and eliminate offset races ([#64](https://github.com/gstn-caruso/shairport-sync/issues/64)) ([964167c](https://github.com/gstn-caruso/shairport-sync/commit/964167c6f5c1a4ab2aaea58fd7242f78f045b0d2))
+
 ## [6.1.8](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.7...v6.1.8) (2026-10-11)
 
 ### Bug Fixes
