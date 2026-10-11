@@ -782,7 +782,7 @@ int ReceiverApplication::run(ReceiverSettings settings) {
         "audio_backend_buffer_interpolation_threshold_in_seconds is %f seconds.",
         config.audio_backend_buffer_interpolation_threshold_in_seconds);
   debug(option_print_level, "audio backend latency offset is %f seconds.",
-        config.audio_backend_latency_offset);
+        processSettings->settings().audio().audio_backend_latency_offset);
   if (config.audio_backend_silent_lead_in_time_auto == 1)
     debug(option_print_level, "audio backend silence lead-in time is \"auto\".");
   else

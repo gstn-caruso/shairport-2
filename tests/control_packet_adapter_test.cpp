@@ -8,6 +8,13 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <thread>
+#include <atomic>
+
+extern "C" int __wrap_ptp_get_clock_info(uint64_t *id,uint64_t *sample,uint64_t *offset,uint64_t *mastership) {
+  *id = 42; *sample = get_absolute_time_in_ns(); *offset = 0; *mastership = 0;
+  return clock_ok;
+}
 
 struct RecordedAnchor { uint64_t clock,time; uint32_t frame,latency; double offset; int warned; };
 static std::mutex anchorMutex;
@@ -18,14 +25,13 @@ extern "C" void __real__ZN8RtpClock9setAnchorEmjmm(RtpClock *,uint64_t,uint32_t,
 extern "C" void __wrap__ZN8RtpClock9setAnchorEmjmm(RtpClock *owner,uint64_t clock,uint32_t frame,uint64_t time,uint64_t now) {
   __real__ZN8RtpClock9setAnchorEmjmm(owner,clock,frame,time,now);
   const auto *session = activeSession;
-  { std::lock_guard lock(anchorMutex); anchors.push_back({clock,time,frame,session->latency,config.audio_backend_latency_offset,session->latency_warning_issued}); }
+  { std::lock_guard lock(anchorMutex); anchors.push_back({clock,time,frame,session->latency,session->timingSettings().offsetSeconds(),session->latency_warning_issued}); }
   anchorChanged.notify_all();
 }
 struct RestoreControlSettings {
   double buffer = config.audio_backend_buffer_desired_length;
-  double offset = config.audio_backend_latency_offset;
   double fraction = config.diagnostic_drop_packet_fraction;
-  ~RestoreControlSettings() { config.audio_backend_buffer_desired_length = buffer; config.audio_backend_latency_offset = offset; config.diagnostic_drop_packet_fraction = fraction; }
+  ~RestoreControlSettings() { config.audio_backend_buffer_desired_length = buffer; config.diagnostic_drop_packet_fraction = fraction; }
 };
 static std::vector<uint8_t> controlTiming(uint32_t first,uint32_t second) {
   std::vector<uint8_t> packet(28);
@@ -37,14 +43,33 @@ static std::vector<uint8_t> controlTiming(uint32_t first,uint32_t second) {
   bigEndian(16,second,4); bigEndian(20,0x1122334455667788,8);
   return packet;
 }
-static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool negativeZero = false) {
+static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool negativeZero = false,bool concurrentReader = false) {
   anchors.clear(); RestoreControlSettings restore;
   config.audio_backend_buffer_desired_length = 0.1;
-  config.audio_backend_latency_offset = -10;
   config.diagnostic_drop_packet_fraction = 0;
-  SessionState session{}; session.inputAudio.setSetupSampleRate(rate);
+  auto timing = std::make_shared<SharedRtpTimingSettings>(-10);
+  auto sessionOwner = SessionState::create(timing);
+  auto &session = *sessionOwner;
+  session.inputAudio.setSetupSampleRate(rate);
   activeSession = &session;
   session.airplay_stream_type = realtime_stream;
+  auto readingOwner = SessionState::create(timing);
+  auto &readingSession = *readingOwner;
+  readingSession.airplay_stream_type = realtime_stream;
+  readingSession.inputAudio.setSetupSampleRate(44100);
+  __real__ZN8RtpClock9setAnchorEmjmm(&readingSession.clock,42,100000,1000000000000,get_absolute_time_in_ns());
+  std::atomic<bool> reading{false}, finishReading{false};
+  std::thread reader;
+  if (concurrentReader) {
+    reader = std::thread([&] {
+      reading.store(true);
+      while (!finishReading.load()) {
+        uint64_t time;
+        frame_to_local_time(100000,&time,&readingSession);
+      }
+    });
+    while (!reading.load()) std::this_thread::yield();
+  }
   const int descriptor = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
   ASSERT_GE(descriptor,0);
   sockaddr_in address{}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -70,6 +95,8 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
       return std::any_of(anchors.begin(),anchors.end(),[](auto anchor){ return anchor.frame == 188975; });
     }); }
   EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0); close(client);
+  finishReading.store(true);
+  if (reader.joinable()) reader.join();
   ASSERT_TRUE(arrived); ASSERT_EQ(anchors.size(),2u);
   EXPECT_EQ(anchors[0].clock,0x1122334455667788u);
   EXPECT_EQ(anchors[0].time,0x0102030405060708u);
@@ -80,8 +107,30 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
     EXPECT_EQ(anchor.warned,negativeZero || rate != 0 ? 1 : 0);
   }
   EXPECT_EQ(session.ap2_control_socket,-1);
+  EXPECT_DOUBLE_EQ(readingSession.timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);
+  auto later = SessionState::create(timing);
+  EXPECT_DOUBLE_EQ(later->timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);
 }
 TEST(ControlPacketLegacy, SentinelD7PublishesBigEndianAnchorAndZeroesSharedOffsetOnce) { runControlPackets(false); }
 TEST(ControlPacketRuntime, InvalidTimingDoesNotPublishAnchorOrLatencyBeforeNextValidPacket) { runControlPackets(true); }
 TEST(ControlPacketRuntime, EarlyAnchorBeforeInputRateSetupStillPublishes) { runControlPackets(false,0); }
 TEST(ControlPacketRuntime, ZeroRateNegativeLatencyKeepsWarnOnceEffectsWithNonfiniteDiagnosticSeconds) { runControlPackets(false,0,true); }
+TEST(ControlPacketRuntime, ConcurrentSessionClockConversionAndControlDisableShareTimingSafely) { runControlPackets(false,44100,false,true); }
+
+TEST(ControlPacketRuntime, ProductionClockConversionsObserveSharedOffsetBeforeAndAfterDisable) {
+  auto timing = std::make_shared<SharedRtpTimingSettings>(-0.1);
+  auto session = SessionState::create(timing);
+  session->inputAudio.setSetupSampleRate(44100);
+  __real__ZN8RtpClock9setAnchorEmjmm(&session->clock,42,100000,1000000000000,get_absolute_time_in_ns());
+  uint64_t time = 0;
+  uint32_t frame = 0;
+  ASSERT_EQ(frame_to_local_time(100000,&time,session.get()),0);
+  EXPECT_EQ(time,999900000000u);
+  ASSERT_EQ(local_time_to_frame(1000000000000,&frame,session.get()),0);
+  EXPECT_EQ(frame,104410u);
+  timing->disableForInsufficientLatency();
+  ASSERT_EQ(frame_to_local_time(100000,&time,session.get()),0);
+  EXPECT_EQ(time,1000000000000u);
+  ASSERT_EQ(local_time_to_frame(1000000000000,&frame,session.get()),0);
+  EXPECT_EQ(frame,100000u);
+}
