@@ -11,3 +11,7 @@ target_sources(receiver-control-packet PUBLIC FILE_SET CXX_MODULES FILES control
 set_target_properties(receiver-control-packet PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_options(receiver-control-packet PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
 target_link_libraries(receiver PUBLIC receiver-control-packet)
+add_library(receiver-resend-coordinator STATIC resend_coordinator.cpp)
+target_include_directories(receiver-resend-coordinator PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(receiver-resend-coordinator PUBLIC Threads::Threads)
+target_link_libraries(receiver PUBLIC receiver-resend-coordinator)
