@@ -5,6 +5,7 @@
 #include <array>
 #include <vector>
 #include <string>
+#include "pairing_test_directory.hpp"
 
 namespace {
 using Bytes = std::vector<uint8_t>;
@@ -23,7 +24,9 @@ void appendRecord(Bytes &bytes,std::string_view id,uint8_t value) {
 }
 class PairingAdapter : public testing::Test {
 protected:
-  SessionState session{};
+  std::unique_ptr<SessionState> owner = SessionState::create(
+      std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory());
+  SessionState &session = *owner;
   std::vector<std::string> added;
   void SetUp() override { session.fd = -1; }
   void TearDown() override {

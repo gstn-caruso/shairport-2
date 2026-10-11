@@ -1,4 +1,5 @@
 #include "session/session_state.hpp"
+#include "pairing_test_directory.hpp"
 #include "protocol/rtp/rtp.h"
 #include "runtime/common.h"
 #include <gtest/gtest.h>
@@ -50,12 +51,12 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
   config.audio_backend_buffer_desired_length = 0.1;
   config.diagnostic_drop_packet_fraction = 0;
   auto timing = std::make_shared<SharedRtpTimingSettings>(-10);
-  auto sessionOwner = SessionState::create(timing);
+  auto sessionOwner = SessionState::create(timing,makeTestPairingDirectory());
   auto &session = *sessionOwner;
   session.inputAudio.setSetupSampleRate(rate);
   activeSession = &session;
   session.airplay_stream_type = realtime_stream;
-  auto readingOwner = SessionState::create(timing);
+  auto readingOwner = SessionState::create(timing,makeTestPairingDirectory());
   auto &readingSession = *readingOwner;
   readingSession.airplay_stream_type = realtime_stream;
   readingSession.inputAudio.setSetupSampleRate(44100);
@@ -110,7 +111,7 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
   }
   EXPECT_EQ(fcntl(descriptor,F_GETFD),-1);
   EXPECT_DOUBLE_EQ(readingSession.timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);
-  auto later = SessionState::create(timing);
+  auto later = SessionState::create(timing,makeTestPairingDirectory());
   EXPECT_DOUBLE_EQ(later->timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);
 }
 TEST(ControlPacketLegacy, SentinelD7PublishesBigEndianAnchorAndZeroesSharedOffsetOnce) { runControlPackets(false); }
@@ -121,7 +122,7 @@ TEST(ControlPacketRuntime, ConcurrentSessionClockConversionAndControlDisableShar
 
 TEST(ControlPacketRuntime, ProductionClockConversionsObserveSharedOffsetBeforeAndAfterDisable) {
   auto timing = std::make_shared<SharedRtpTimingSettings>(-0.1);
-  auto session = SessionState::create(timing);
+  auto session = SessionState::create(timing,makeTestPairingDirectory());
   session->inputAudio.setSetupSampleRate(44100);
   __real__ZN8RtpClock9setAnchorEmjmm(&session->clock,42,100000,1000000000000,get_absolute_time_in_ns());
   uint64_t time = 0;

@@ -86,6 +86,7 @@
 
 
 #include <syslog.h>
+import receiver.protocol.ap2.pairing_directory;
 
 
 
@@ -861,7 +862,8 @@ int ReceiverApplication::run(ReceiverSettings settings) {
   debug(4, "create an RTSP listener");
   auto timingSettings = std::make_shared<SharedRtpTimingSettings>(
       processSettings->settings().audio().audio_backend_latency_offset);
-  int listenerError = rtsp_listener_start(timingSettings);
+  std::shared_ptr<PairingDirectoryPort> pairingDirectory = std::make_shared<PairingDirectory>();
+  int listenerError = rtsp_listener_start(timingSettings,pairingDirectory);
   if (listenerError)
     die("Cannot create RTSP listener: %s", strerror(listenerError));
 

@@ -29,6 +29,7 @@
 
 #include "session/session_state.hpp"
 #include "protocol/ap2/native_encrypted_channel.hpp"
+#include "protocol/ap2/pairing_management.hpp"
 #include "audio/output/audio_player_adapter.hpp"
 #include "volume/volume_runtime.hpp"
 #include <arpa/inet.h>
@@ -872,86 +873,6 @@ void handle_get(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
 }
 
 
-struct pairings {
-  char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
-  uint8_t public_key[32];
-
-  struct pairings *next;
-} *pairings;
-
-static struct pairings *pairing_find(const char *device_id) {
-  for (struct pairings *pairing = pairings; pairing; pairing = pairing->next) {
-    if (strcmp(device_id, pairing->device_id) == 0)
-      return pairing;
-  }
-  return NULL;
-}
-
-static void pairing_add(uint8_t public_key[32], const char *device_id) {
-  struct pairings *pairing = static_cast<struct pairings *>(calloc(1, sizeof(struct pairings)));
-  snprintf(pairing->device_id, sizeof(pairing->device_id), "%s", device_id);
-  memcpy(pairing->public_key, public_key, sizeof(pairing->public_key));
-
-  pairing->next = pairings;
-  pairings = pairing;
-}
-
-static void pairing_remove(struct pairings *pairing) {
-  if (pairing == pairings) {
-    pairings = pairing->next;
-  } else {
-    struct pairings *iter;
-    for (iter = pairings; iter && (iter->next != pairing); iter = iter->next)
-      ; /* EMPTY */
-
-    if (iter)
-      iter->next = pairing->next;
-  }
-
-  free(pairing);
-}
-
-static int pairing_add_cb(uint8_t public_key[32], const char *device_id,
-                          void *cb_arg) {
-  if (!public_key) {
-    *static_cast<bool *>(cb_arg) = true;
-    return -1;
-  }
-  debug(1, "pair-add cb for %s", device_id);
-
-  struct pairings *pairing = pairing_find(device_id);
-  if (pairing) {
-    memcpy(pairing->public_key, public_key, sizeof(pairing->public_key));
-    return 0;
-  }
-
-  pairing_add(public_key, device_id);
-  return 0;
-}
-
-static int pairing_remove_cb(uint8_t public_key[32] __attribute__((unused)), const char *device_id,
-                             void *cb_arg __attribute__((unused))) {
-  debug(1, "pair-remove cb for %s", device_id);
-
-  struct pairings *pairing = pairing_find(device_id);
-  if (!pairing) {
-    debug(1, "pair-remove callback for device \"%s\".", device_id);
-    return -1;
-  }
-
-  pairing_remove(pairing);
-  return 0;
-}
-
-static void pairing_list_cb(pair_cb enum_cb, void *enum_cb_arg,
-                            void *cb_arg __attribute__((unused))) {
-  debug(1, "pair-list cb");
-
-  for (struct pairings *pairing = pairings; pairing; pairing = pairing->next) {
-    enum_cb(pairing->public_key, pairing->device_id, enum_cb_arg);
-  }
-}
-
 void handle_pair_add(rtsp_conn_info *conn __attribute__((unused)), RtspMessage *req,
                      RtspMessage *resp) {
 
@@ -964,18 +885,14 @@ void handle_pair_add(rtsp_conn_info *conn __attribute__((unused)), RtspMessage *
   debug(1, "Connection %d from \"%s\": handle_pair_add", conn->connection_number,
         conn->ap2_client_name);
   debug_log_rtsp_message_conn(conn, 1, "pair-add request", req);
-  uint8_t *body = NULL;
-  size_t body_len = 0;
-  bool invalidKey = false;
-  int ret = pair_add(PAIR_SERVER_HOMEKIT, &body, &body_len, pairing_add_cb, &invalidKey,
-                     (const uint8_t *)req->bodyData(), req->bodyLength());
-  if (ret < 0 || invalidKey) {
-    free(body);
+  PairingManagement management(conn->pairingDirectory());
+  auto body = management.add({reinterpret_cast<const uint8_t *>(req->bodyData()),req->bodyLength()});
+  if (!body) {
     debug(1, "pair-add returned an error");
     resp->respondWith(451);
     return;
   }
-  replaceBodyFromAllocation(*resp, reinterpret_cast<char *>(body), body_len);
+  resp->replaceBody({reinterpret_cast<const char *>(body->data()),body->size()});
   resp->addHeader("Content-Type", "application/octet-stream");
   debug_log_rtsp_message_conn(conn, 1, "pair-add response", resp);
 }
@@ -990,16 +907,14 @@ void handle_pair_list(rtsp_conn_info *conn __attribute__((unused)), RtspMessage 
   }
   debug(1, "Connection %d from \"%s\": handle_pair_list", conn->connection_number,
         conn->ap2_client_name);
-  uint8_t *body = NULL;
-  size_t body_len = 0;
-  int ret = pair_list(PAIR_SERVER_HOMEKIT, &body, &body_len, pairing_list_cb, NULL,
-                      (const uint8_t *)req->bodyData(), req->bodyLength());
-  if (ret < 0) {
+  PairingManagement management(conn->pairingDirectory());
+  auto body = management.list({reinterpret_cast<const uint8_t *>(req->bodyData()),req->bodyLength()});
+  if (!body) {
     debug(1, "pair-list returned an error");
     resp->respondWith(451);
     return;
   }
-  replaceBodyFromAllocation(*resp, reinterpret_cast<char *>(body), body_len);
+  resp->replaceBody({reinterpret_cast<const char *>(body->data()),body->size()});
   resp->addHeader("Content-Type", "application/octet-stream");
   debug_log_rtsp_message_conn(conn, 1, "pair-list response", resp);
 }
@@ -1015,16 +930,14 @@ void handle_pair_remove(rtsp_conn_info *conn __attribute__((unused)), RtspMessag
   }
   debug(1, "Connection %d from \"%s\": handle_pair_remove", conn->connection_number,
         conn->ap2_client_name);
-  uint8_t *body = NULL;
-  size_t body_len = 0;
-  int ret = pair_remove(PAIR_SERVER_HOMEKIT, &body, &body_len, pairing_remove_cb, NULL,
-                        (const uint8_t *)req->bodyData(), req->bodyLength());
-  if (ret < 0) {
+  PairingManagement management(conn->pairingDirectory());
+  auto body = management.remove({reinterpret_cast<const uint8_t *>(req->bodyData()),req->bodyLength()});
+  if (!body) {
     debug(1, "pair-remove returned an error");
     resp->respondWith(451);
     return;
   }
-  replaceBodyFromAllocation(*resp, reinterpret_cast<char *>(body), body_len);
+  resp->replaceBody({reinterpret_cast<const char *>(body->data()),body->size()});
   resp->addHeader("Content-Type", "application/octet-stream");
   debug_log_rtsp_message_conn(conn, 1, "pair-remove response", resp);
 }
@@ -2597,7 +2510,8 @@ static const char *format_address(struct sockaddr *fsa) {
 */
 
 static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop,
-                             const std::shared_ptr<SharedRtpTimingSettings> &timing) {
+                             const std::shared_ptr<SharedRtpTimingSettings> &timing,
+                             const std::shared_ptr<PairingDirectoryPort> &directory) {
   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, nullptr);
   pthread_setname_np(pthread_self(), "listener");
   struct addrinfo hints, *info, *p;
@@ -2697,7 +2611,7 @@ static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop,
 
       std::unique_ptr<SessionState> unregistered;
       try {
-        unregistered = SessionState::create(timing);
+        unregistered = SessionState::create(timing,directory);
       } catch (const std::bad_alloc &) {
         close(acceptedSocket);
         warn("Couldn't allocate memory for an rtsp_conn_info record.");
@@ -2860,15 +2774,16 @@ static RtspListener &rtspListener() {
   return listener;
 }
 
-int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing) {
-  if (!timing)
+int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing,
+                        std::shared_ptr<PairingDirectoryPort> directory) {
+  if (!timing || !directory)
     return EINVAL;
   try {
     auto &listener = rtspListener();
     atexit(rtsp_listener_stop);
-    listener.start([&listener, timing = std::move(timing)](std::stop_token stop) {
+    listener.start([&listener, timing = std::move(timing), directory = std::move(directory)](std::stop_token stop) {
       try {
-        rtsp_listen_loop(listener, stop, timing);
+        rtsp_listen_loop(listener, stop, timing,directory);
       } catch (const std::exception &error) {
         warn("RTSP listener failed: %s", error.what());
         exit_request(EXIT_FAILURE);

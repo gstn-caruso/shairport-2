@@ -3,6 +3,7 @@
 #include "session/session_category.h"
 #include "session/principal_participant.hpp"
 #include "session/ap2_pairing.hpp"
+#include "protocol/ap2/pairing_directory_port.hpp"
 #include "protocol/ap2/buffered_flush_policy.hpp"
 #include "runtime/common.h"
 #include "playback/player.h"
@@ -29,8 +30,10 @@
 
 struct SessionState : PrincipalParticipant {
   SessionState() = default;
-  static std::unique_ptr<SessionState> create(std::shared_ptr<SharedRtpTimingSettings> timing);
+  static std::unique_ptr<SessionState> create(std::shared_ptr<SharedRtpTimingSettings> timing,
+                                             std::shared_ptr<PairingDirectoryPort> directory);
   SharedRtpTimingSettings &timingSettings() const { return *timingSettings_; }
+  PairingDirectoryPort &pairingDirectory() const { return *pairingDirectory_; }
   SessionState(const SessionState &) = delete;
   SessionState &operator=(const SessionState &) = delete;
   ~SessionState() override;
@@ -184,6 +187,7 @@ struct SessionState : PrincipalParticipant {
   void *dapo_private_storage; // this is used for compatibility, if dacp stuff isn't enabled.
 
 private:
+  std::shared_ptr<PairingDirectoryPort> pairingDirectory_;
   std::shared_ptr<SharedRtpTimingSettings> timingSettings_ =
       std::make_shared<SharedRtpTimingSettings>(0);
   std::atomic<bool> retiring_{false};
