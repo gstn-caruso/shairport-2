@@ -9,6 +9,10 @@ for the affected migration slices.
 See [migration progress](receiver-migration-progress.md) for subsequent
 deliveries and their verification; the observations below describe the original
 baseline.
+For current component boundaries and validation use
+[architecture](architecture.md) and [VALIDATION.md](../VALIDATION.md).
+The CLI and ownership gaps in this inventory are historical observations, not
+instructions to restore removed options or evidence that merged work is pending.
 
 ## Verification baseline
 

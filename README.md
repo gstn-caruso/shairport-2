@@ -5,8 +5,8 @@ Select the receiver on an AirPlay device; Shairport Sync receives the encrypted
 stream, decodes it, schedules playback against the AirPlay clock and sends the
 audio to your PulseAudio-compatible session.
 
-This fork supports realtime and buffered playback, encrypted pairing, Home
-integration and sender-controlled volume. It runs as a **systemd user service**
+This fork provides realtime and buffered playback, encrypted pairing, Home
+endpoints and sender-controlled volume. It runs as a **systemd user service**
 and works with PulseAudio or PipeWire's `pipewire-pulse` compatibility server.
 
 This repository now maintains both the **audio receiver** and its **timing
@@ -297,12 +297,13 @@ files, tests and installation.
 
 | Package | What it owns |
 | --- | --- |
-| [`src/app`](src/app) | Entrypoint, configuration and startup checks. |
+| [`src/app`](src/app) | Owned configuration, startup checks and application composition. |
 | [`src/discovery`](src/discovery) | Bonjour records and Avahi registration. |
-| [`src/protocol/rtsp`](src/protocol/rtsp) | Session-control requests, pairing endpoints and stream setup. |
+| [`src/protocol/rtsp`](src/protocol/rtsp) | Framing/parameter components, runtime requests, pairing endpoints and stream setup. |
 | [`src/protocol/rtp`](src/protocol/rtp) | Realtime packet reception, control traffic and clock anchors. |
-| [`src/protocol/ap2`](src/protocol/ap2) | Buffered audio processing and AirPlay 2 event handling. |
-| [`src/session`](src/session) | Per-session state and session thread registration, retirement and shutdown. |
+| [`src/protocol/ap2`](src/protocol/ap2) | Buffered/event components, pairing directory and native management adapters. |
+| [`src/session`](src/session) | Registry/runtime workers, principal policy, per-session state and native pairing ownership. |
+| [`src/transport`](src/transport) | Bounded byte queues, native transport lifetime, event workers and encrypted byte IO. |
 | [`src/audio`](src/audio) | Formats, channel mapping, decoding, buffering, resampling, PCM and output adapters. |
 | [`src/packets`](src/packets) | Retransmission planning. |
 | [`src/playback`](src/playback) | Player coordination, playback-thread lifecycle, timing, synchronization and statistics. |
@@ -313,11 +314,17 @@ files, tests and installation.
 | [`pair_ap`](pair_ap) | Bundled C pairing implementation. |
 | [Timing companion](companion/nqptp) | PTP clock tracking, socket and shared-memory ownership; see its [upstream provenance](companion/nqptp/PROVENANCE.md). |
 
-Packets, audio formats, PCM, playback timing, volume policy, RTP clocks and text
-formatting have separate library targets. Other packages contribute to the
-shared `receiver` target. This lets isolated tests build without relinking
-unrelated receiver components; see [BUILD.md](BUILD.md#build-checks) for targeted
-CTest commands.
+Independent targets now cover session/principal policy, RTSP framing/parameters,
+buffered/realtime/control reception, transport, pairing, audio conversion/output,
+timing, volume and text. Native adapters still contribute to the shared
+`receiver` target. Ten named C++ modules isolate policy and protocol boundaries;
+ordinary headers remain at native IO and C ABI boundaries.
+
+[The architecture guide](docs/architecture.md) maps each component to its
+responsibilities and dependencies. [Migration status](docs/receiver-migration-progress.md)
+distinguishes merged work from remaining global configuration, public session
+state, worker shutdown and re-pairing synchronization. The migration is not
+complete. See [BUILD.md](BUILD.md#build-checks) for isolated feedback commands.
 
 ## Validation and troubleshooting
 
@@ -352,10 +359,18 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for further diagnostics and
 - [ADDINGTOHOME.md](ADDINGTOHOME.md): Home pairing and device checks.
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md): diagnostic guidance.
 - [VALIDATION.md](VALIDATION.md): test coverage, evidence and verification limits.
+- [Architecture](docs/architecture.md): component ownership, modules and explicit dependencies.
+- [Migration status](docs/receiver-migration-progress.md): delivered boundaries and remaining work.
+- [RELEASENOTES.md](RELEASENOTES.md): fork release history and upgrade guidance.
 
 All project documentation, code comments, commit messages and pull requests
 must be written in English. The diagrams use Mermaid, which GitHub renders
 directly in this README.
 
 Licenses are listed in [LICENSES](LICENSES) and the source files.
-[RELEASENOTES.md](RELEASENOTES.md) contains upstream release history.
+Historical upstream notes and earlier implementation evidence are retained under
+[`docs/history`](docs/history); their commands and feature lists describe those
+old revisions, rather than the current supported stack.
+The documentation bundle is staged with the program and installed under
+`share/doc/shairport-sync`. Build examples and source-navigation links assume
+a repository checkout.

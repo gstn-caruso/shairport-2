@@ -11,7 +11,9 @@ shairport-sync \- AirPlay 2 receiver for Linux with PulseAudio
 .RI [ --config " PATH" ]
 .SH DESCRIPTION
 Receives realtime and buffered AirPlay 2 audio. PulseAudio, Avahi, OpenSSL,
-FFmpeg and compatible NQPTP are required. Missing or incompatible NQPTP causes
+FFmpeg and compatible timing shared memory are required. The package includes
+shairport-sync-nqptp (SMI10), built at the receiver's release version.
+Missing or incompatible timing shared memory causes
 startup to fail before listening or advertising. No AirPlay 1 fallback is provided.
 PipeWire can be used through its PulseAudio-compatible server.
 .SH OPTIONS
@@ -35,7 +37,9 @@ directory (/etc in Debian packages). An absent default file uses built-in
 defaults. Legacy setting flags are removed. Restart after configuration changes.
 .SH SERVICE
 Run as a systemd user service belonging to the PulseAudio session owner.
-NQPTP and Avahi run separately. No system account or alternate init installer
+The bundled shairport-sync-nqptp companion and Avahi run as system services.
+Start the companion first; restart the receiver after companion restart to
+remap shared memory. No system account or alternate init installer
 is provided.
 The process stays in the foreground. Systemd owns restart and supervision.
 Logs go to stderr for the journal. SIGTERM and SIGINT request shutdown.
