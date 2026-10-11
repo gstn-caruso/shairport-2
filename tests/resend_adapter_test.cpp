@@ -11,6 +11,8 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <vector>
+#include <cerrno>
 #include "cancellation_wait.hpp"
 
 static CancellationWait *cancellation;
@@ -18,6 +20,30 @@ static std::atomic<bool> finishAtObservableCancellation{false};
 static std::mutex captureMutex;
 static std::condition_variable captured;
 static unsigned captures = 0;
+static bool scriptedIo = false;
+static uint64_t scriptedNow = 100;
+static unsigned sampledTimes = 0;
+static std::vector<int> sendEvents;
+extern "C" uint64_t __real_get_absolute_time_in_ns();
+extern "C" uint64_t __wrap_get_absolute_time_in_ns() {
+  if (!scriptedIo) return __real_get_absolute_time_in_ns();
+  ++sampledTimes; return scriptedNow;
+}
+extern "C" int __real_setsockopt(int,int,int,const void *,socklen_t);
+extern "C" int __wrap_setsockopt(int fd,int level,int option,const void *value,socklen_t length) {
+  if (!scriptedIo) return __real_setsockopt(fd,level,option,value,length);
+  EXPECT_EQ(level,SOL_SOCKET); EXPECT_EQ(option,SO_SNDTIMEO);
+  EXPECT_EQ(length,sizeof(timeval));
+  const auto &timeout = *static_cast<const timeval *>(value);
+  EXPECT_EQ(timeout.tv_sec,0); EXPECT_EQ(timeout.tv_usec,100000);
+  sendEvents.push_back(1); errno = ENOPROTOOPT; return -1;
+}
+extern "C" ssize_t __real_sendto(int,const void *,size_t,int,const sockaddr *,socklen_t);
+extern "C" ssize_t __wrap_sendto(int fd,const void *bytes,size_t length,int flags,const sockaddr *peer,socklen_t peerLength) {
+  if (!scriptedIo) return __real_sendto(fd,bytes,length,flags,peer,peerLength);
+  EXPECT_EQ(length,8u); EXPECT_EQ(peerLength,sizeof(sockaddr_in));
+  sendEvents.push_back(2); errno = EPIPE; return -1;
+}
 extern "C" bool __real__ZN17RemoteControlPeer15captureIfAbsentEPK8sockaddrj(RemoteControlPeer *,const sockaddr *,socklen_t);
 extern "C" bool __wrap__ZN17RemoteControlPeer15captureIfAbsentEPK8sockaddrj(RemoteControlPeer *owner,const sockaddr *address,socklen_t length) {
   const bool result = __real__ZN17RemoteControlPeer15captureIfAbsentEPK8sockaddrj(owner,address,length);
@@ -156,5 +182,30 @@ TEST(ResendRuntime, D7AndD6KeepFirstPeerUntilCleanupThenAllowNewEndpoint) {
   receiveRequest(second);
   stopWorker(second,2);
   close(first); close(second);
+  config.diagnostic_drop_packet_fraction = fraction;
+}
+
+TEST(ResendRuntime, TimeoutSetupFailureStillSendsAndInitialiseResetsFailureBackoff) {
+  const double fraction = config.diagnostic_drop_packet_fraction;
+  config.diagnostic_drop_packet_fraction = 0;
+  SessionState session{};
+  scriptedIo = true; sampledTimes = 0; sendEvents.clear(); scriptedNow = 100;
+  rtp_request_resend(1,1,&session);
+  session.rtp_running = 1;
+  rtp_request_resend(1,1,&session);
+  EXPECT_EQ(sampledTimes,0u); EXPECT_TRUE(sendEvents.empty());
+  sockaddr_in peer{}; peer.sin_family = AF_INET;
+  ASSERT_TRUE(session.remoteControlPeer.captureIfAbsent(reinterpret_cast<sockaddr *>(&peer),sizeof(peer)));
+  rtp_request_resend(1,1,&session);
+  EXPECT_EQ(sendEvents,(std::vector<int>{1,2}));
+  scriptedNow += 300000000;
+  rtp_request_resend(1,1,&session);
+  EXPECT_EQ(sendEvents.size(),2u);
+  rtp_initialise(&session);
+  session.rtp_running = 1;
+  rtp_request_resend(1,1,&session);
+  EXPECT_EQ(sendEvents,(std::vector<int>{1,2,1,2}));
+  rtp_terminate(&session);
+  scriptedIo = false;
   config.diagnostic_drop_packet_fraction = fraction;
 }
