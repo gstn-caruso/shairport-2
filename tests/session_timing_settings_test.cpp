@@ -4,7 +4,7 @@
 
 TEST(SessionTimingSettings, FactoryPreservesValueInitializationAndExactSharedOwner) {
   auto timing = std::make_shared<SharedRtpTimingSettings>(-0.25);
-  auto session = SessionState::create(timing,makeTestPairingDirectory());
+  auto session = SessionState::create(timing,makeTestPairingDirectory(),makeTestPairingOptions());
   EXPECT_EQ(&session->timingSettings(), timing.get());
   EXPECT_EQ(session->connection_number, 0);
   EXPECT_EQ(session->UserAgent, nullptr);
@@ -18,12 +18,12 @@ TEST(SessionTimingSettings, FactoryPreservesValueInitializationAndExactSharedOwn
 
 TEST(SessionTimingSettings, ExistingAndLaterSessionsShareDisableWhileDefaultsAreIsolated) {
   auto timing = std::make_shared<SharedRtpTimingSettings>(-0.25);
-  auto first = SessionState::create(timing,makeTestPairingDirectory());
-  auto second = SessionState::create(timing,makeTestPairingDirectory());
+  auto first = SessionState::create(timing,makeTestPairingDirectory(),makeTestPairingOptions());
+  auto second = SessionState::create(timing,makeTestPairingDirectory(),makeTestPairingOptions());
   SessionState isolated{};
   EXPECT_DOUBLE_EQ(second->timingSettings().offsetSeconds(), -0.25);
   first->timingSettings().disableForInsufficientLatency();
-  auto later = SessionState::create(timing,makeTestPairingDirectory());
+  auto later = SessionState::create(timing,makeTestPairingDirectory(),makeTestPairingOptions());
   EXPECT_DOUBLE_EQ(second->timingSettings().offsetSeconds(), 0);
   EXPECT_DOUBLE_EQ(later->timingSettings().offsetSeconds(), 0);
   EXPECT_DOUBLE_EQ(isolated.timingSettings().offsetSeconds(), 0);
@@ -34,15 +34,16 @@ TEST(SessionTimingSettings, ExistingAndLaterSessionsShareDisableWhileDefaultsAre
 }
 
 TEST(SessionTimingSettings, NullSharedOwnerIsRejectedAtFactoryBoundary) {
-  EXPECT_THROW(SessionState::create(nullptr,makeTestPairingDirectory()), std::invalid_argument);
-  EXPECT_THROW(SessionState::create(std::make_shared<SharedRtpTimingSettings>(0),nullptr), std::invalid_argument);
+  EXPECT_THROW(SessionState::create(nullptr,makeTestPairingDirectory(),makeTestPairingOptions()), std::invalid_argument);
+  EXPECT_THROW(SessionState::create(std::make_shared<SharedRtpTimingSettings>(0),nullptr,makeTestPairingOptions()), std::invalid_argument);
+  EXPECT_THROW(SessionState::create(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory(),nullptr), std::invalid_argument);
 }
 
 TEST(SessionPairingDirectory, SharedApplicationOwnerOutlivesOtherSessionsAndIsolatesApplications) {
   auto directory = makeTestPairingDirectory(); auto *identity = directory.get();
   auto timing = std::make_shared<SharedRtpTimingSettings>(0);
-  auto first = SessionState::create(timing,directory); auto second = SessionState::create(timing,directory);
-  auto isolated = SessionState::create(timing,makeTestPairingDirectory());
+  auto first = SessionState::create(timing,directory,makeTestPairingOptions()); auto second = SessionState::create(timing,directory,makeTestPairingOptions());
+  auto isolated = SessionState::create(timing,makeTestPairingDirectory(),makeTestPairingOptions());
   std::array<uint8_t,32> key{}; key.fill(4);
   first->pairingDirectory().upsert("ordinary-device",key);
   EXPECT_EQ(&second->pairingDirectory(),identity);

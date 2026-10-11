@@ -7,8 +7,10 @@
 #include <memory>
 class SharedRtpTimingSettings;
 class PairingDirectoryPort;
+struct PairingOptions;
 int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing,
-                        std::shared_ptr<PairingDirectoryPort> directory);
+                        std::shared_ptr<PairingDirectoryPort> directory,
+                        std::shared_ptr<const PairingOptions> options);
 class RtspMessage;
 using rtsp_message = RtspMessage;
 extern "C" {

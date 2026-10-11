@@ -24,19 +24,13 @@ extern "C" pair_verify_context *__wrap_pair_verify_new(pair_type type,const char
 class PairingSessionAdapter : public testing::Test {
 protected:
   SessionState session{};
-  char *previousDevice = config.airplay_device_id;
-  char *previousPassword = config.password;
   void SetUp() override {
     ASSERT_NE(gcry_check_version(nullptr),nullptr);
     gcry_control(GCRYCTL_INITIALIZATION_FINISHED,0);
-    config.airplay_device_id = const_cast<char *>("00:11:22:33:44:55");
-    config.password = nullptr;
+    session.pairingSession.configure(makeTestPairingOptions());
   }
   void TearDown() override {
-    pair_setup_free(session.ap2_pairing_context.setup_ctx);
-    pair_verify_free(session.ap2_pairing_context.verify_ctx);
     free(session.ap2_client_name); session.ap2_client_name = nullptr;
-    config.airplay_device_id = previousDevice; config.password = previousPassword;
     failSetupCreation = failVerifyCreation = false;
   }
   RtspMessage dispatch(std::string_view path,std::span<const uint8_t> bytes) {
@@ -82,9 +76,9 @@ TEST_F(PairingSessionAdapter, RealTransientExchangeReturnsPlaintextSetupAndPrepa
   }
   pair_result *result = nullptr; ASSERT_EQ(pair_setup_result(nullptr,&result,client.get()),0);
   ASSERT_GT(result->shared_secret_len,0u);
-  EXPECT_TRUE(session.ap2_pairing_context.control_cipher_bundle.prepared());
-  EXPECT_TRUE(session.ap2_pairing_context.event_cipher_bundle.prepared());
-  EXPECT_FALSE(session.ap2_pairing_context.control_cipher_bundle.responsesEncrypted());
+  EXPECT_TRUE(session.pairingSession.controlChannel().prepared());
+  EXPECT_TRUE(session.pairingSession.eventChannel().prepared());
+  EXPECT_FALSE(session.pairingSession.controlChannel().responsesEncrypted());
 }
 
 TEST_F(PairingSessionAdapter, SeedBeforeSetupLeavesRemoteDataPortUnopened) {
@@ -97,5 +91,5 @@ TEST_F(PairingSessionAdapter, SeedBeforeSetupLeavesRemoteDataPortUnopened) {
   RtspMessage request,response; request.request("SETUP"); replaceBodyWithPlist(request,setup); plist_free(setup);
   rtsp_dispatch_request(&session,&request,&response);
   EXPECT_EQ(response.responseCode(),200); EXPECT_EQ(session.local_data_port,0);
-  EXPECT_FALSE(session.ap2_pairing_context.data_cipher_bundle.prepared());
+  EXPECT_FALSE(session.pairingSession.dataChannel().prepared());
 }

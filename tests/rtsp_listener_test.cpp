@@ -43,6 +43,7 @@ static std::mutex directoriesMutex;
 static std::condition_variable directoriesChanged;
 static std::vector<std::shared_ptr<PairingDirectoryPort>> acceptedDirectories;
 static unsigned directoryConversationsFinished = 0;
+static std::vector<std::shared_ptr<const PairingOptions>> acceptedPairingOptions;
 
 extern "C" void realSessionFinished(void *,int)
     asm("__real__ZN15SessionRegistry12markFinishedEi");
@@ -57,17 +58,23 @@ extern "C" void wrappedSessionFinished(void *registry,int id) {
   }
 }
 
-std::unique_ptr<SessionState> realSessionCreate(std::shared_ptr<SharedRtpTimingSettings>,std::shared_ptr<PairingDirectoryPort>)
-    asm("__real__ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsES0_I20PairingDirectoryPortE");
-std::unique_ptr<SessionState> wrappedSessionCreate(std::shared_ptr<SharedRtpTimingSettings>,std::shared_ptr<PairingDirectoryPort>)
-    asm("__wrap__ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsES0_I20PairingDirectoryPortE");
+std::unique_ptr<SessionState> realSessionCreate(std::shared_ptr<SharedRtpTimingSettings>,std::shared_ptr<PairingDirectoryPort>,std::shared_ptr<const PairingOptions>)
+    asm("__real__ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsES0_I20PairingDirectoryPortES0_IK14PairingOptionsE");
+std::unique_ptr<SessionState> wrappedSessionCreate(std::shared_ptr<SharedRtpTimingSettings>,std::shared_ptr<PairingDirectoryPort>,std::shared_ptr<const PairingOptions>)
+    asm("__wrap__ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsES0_I20PairingDirectoryPortES0_IK14PairingOptionsE");
 std::unique_ptr<SessionState> wrappedSessionCreate(std::shared_ptr<SharedRtpTimingSettings> timing,
-                                                  std::shared_ptr<PairingDirectoryPort> directory) {
-  auto session = realSessionCreate(timing,directory);
+                                                  std::shared_ptr<PairingDirectoryPort> directory,
+                                                  std::shared_ptr<const PairingOptions> options) {
+  auto session = realSessionCreate(timing,directory,options);
+  EXPECT_EQ(session->pairingSession.options().get(),options.get());
   if (captureTiming.exchange(false)) acceptedTiming.set_value(std::move(timing));
   if (captureDirectories.load()) {
     EXPECT_EQ(&session->pairingDirectory(),directory.get());
-    { std::lock_guard lock(directoriesMutex); acceptedDirectories.push_back(std::move(directory)); }
+    {
+      std::lock_guard lock(directoriesMutex);
+      acceptedDirectories.push_back(std::move(directory));
+      acceptedPairingOptions.push_back(std::move(options));
+    }
     directoriesChanged.notify_all();
   }
   return session;
@@ -110,7 +117,7 @@ static int failedWorkerCreation() {
   restricted.rlim_cur = 0;
   if (setrlimit(RLIMIT_NPROC, &restricted) != 0)
     return 12;
-  int error = rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory());
+  int error = rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory(),makeTestPairingOptions());
   if (setrlimit(RLIMIT_NPROC, &previous) != 0 || error != EAGAIN)
     return 13;
   rtsp_listener_stop();
@@ -124,7 +131,7 @@ int main(int argc, char **argv) {
   if (argc >= 2 && std::string(argv[1]) == "--listener-exit") {
     config.port = 0;
     observeWait = true;
-    if (rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory()) != 0 || !waiting.try_acquire_for(500ms))
+    if (rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory(),makeTestPairingOptions()) != 0 || !waiting.try_acquire_for(500ms))
       return 19;
     return 0;
   }
@@ -324,7 +331,7 @@ TEST(RtspListener, ProtocolLoopStopsWhileWaitingForConnection) {
   }
   config.port = 0;
   observeWait = true;
-  ASSERT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory()), 0);
+  ASSERT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory(),makeTestPairingOptions()), 0);
   ASSERT_TRUE(waiting.try_acquire_for(500ms));
   auto stop = std::async(std::launch::async, rtsp_listener_stop);
   EXPECT_EQ(stop.wait_for(500ms), std::future_status::ready);
@@ -346,7 +353,7 @@ TEST(RtspListener, AcceptedSessionReceivesExactOwnerAndRetainsItAfterListenerSto
   auto accepted = acceptedTiming.get_future();
   auto finished = conversationFinished.get_future();
   observeConversationFinish = true;
-  ASSERT_EQ(rtsp_listener_start(timing,makeTestPairingDirectory()),0);
+  ASSERT_EQ(rtsp_listener_start(timing,makeTestPairingDirectory(),makeTestPairingOptions()),0);
   ASSERT_TRUE(waiting.try_acquire_for(500ms));
   const int client = socket(AF_INET,SOCK_STREAM | SOCK_CLOEXEC,0);
   ASSERT_GE(client,0);
@@ -355,7 +362,7 @@ TEST(RtspListener, AcceptedSessionReceivesExactOwnerAndRetainsItAfterListenerSto
   ASSERT_EQ(accepted.wait_for(500ms),std::future_status::ready);
   auto passed = accepted.get();
   EXPECT_EQ(passed.get(),identity);
-  auto retained = SessionState::create(passed,makeTestPairingDirectory());
+  auto retained = SessionState::create(passed,makeTestPairingDirectory(),makeTestPairingOptions());
   timing.reset(); passed.reset();
   close(client);
   ASSERT_EQ(finished.wait_for(500ms),std::future_status::ready);
@@ -367,8 +374,9 @@ TEST(RtspListener, AcceptedSessionReceivesExactOwnerAndRetainsItAfterListenerSto
 }
 
 TEST(RtspListener, MissingTimingOwnerDoesNotStartListener) {
-  EXPECT_EQ(rtsp_listener_start(nullptr,makeTestPairingDirectory()),EINVAL);
-  EXPECT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),nullptr),EINVAL);
+  EXPECT_EQ(rtsp_listener_start(nullptr,makeTestPairingDirectory(),makeTestPairingOptions()),EINVAL);
+  EXPECT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),nullptr,makeTestPairingOptions()),EINVAL);
+  EXPECT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory(),nullptr),EINVAL);
 }
 
 TEST(RtspListener, AcceptedSessionsShareDirectoryAndRetainItAfterListenerStop) {
@@ -380,7 +388,8 @@ TEST(RtspListener, AcceptedSessionsShareDirectoryAndRetainItAfterListenerStop) {
   config.port = 0; observeWait = true; captureDirectories = true;
   auto timing = std::make_shared<SharedRtpTimingSettings>(0);
   auto directory = makeTestPairingDirectory(); auto *identity = directory.get();
-  ASSERT_EQ(rtsp_listener_start(timing,directory),0);
+  auto options = makeTestPairingOptions(); auto *optionsIdentity = options.get();
+  ASSERT_EQ(rtsp_listener_start(timing,directory,options),0);
   ASSERT_TRUE(waiting.try_acquire_for(500ms));
   boundAddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   std::array<int,2> clients;
@@ -392,15 +401,20 @@ TEST(RtspListener, AcceptedSessionsShareDirectoryAndRetainItAfterListenerStop) {
     std::unique_lock lock(directoriesMutex);
     ASSERT_TRUE(directoriesChanged.wait_for(lock,1s,[]{ return acceptedDirectories.size() == 2; }));
     EXPECT_EQ(acceptedDirectories[0].get(),identity); EXPECT_EQ(acceptedDirectories[1].get(),identity);
+    EXPECT_EQ(acceptedPairingOptions[0].get(),optionsIdentity);
+    EXPECT_EQ(acceptedPairingOptions[1].get(),optionsIdentity);
   }
-  auto retained = SessionState::create(timing,acceptedDirectories[0]);
-  directory.reset();
+  auto retained = SessionState::create(timing,acceptedDirectories[0],acceptedPairingOptions[0]);
+  directory.reset(); options.reset();
   for (int client : clients) close(client);
   {
     std::unique_lock lock(directoriesMutex);
     ASSERT_TRUE(directoriesChanged.wait_for(lock,1s,[]{ return directoryConversationsFinished == 2; }));
   }
-  rtsp_listener_stop(); captureDirectories = false; acceptedDirectories.clear();
+  rtsp_listener_stop(); captureDirectories = false; acceptedDirectories.clear(); acceptedPairingOptions.clear();
+  EXPECT_EQ(retained->pairingSession.options().get(),optionsIdentity);
+  EXPECT_EQ(retained->pairingSession.options()->deviceId,"00:11:22:33:44:55");
+  EXPECT_EQ(retained->pairingSession.options()->password,std::nullopt);
   std::array<uint8_t,32> key{}; key.fill(6);
   retained->pairingDirectory().upsert("retained-device",key);
   EXPECT_EQ(&retained->pairingDirectory(),identity);
@@ -416,7 +430,7 @@ TEST(RtspListener, FailedBindRequestsExitAndReleasesEverySocket) {
   config.port = 0;
   rejectBind = true;
   auto failed = exitRequested.get_future();
-  ASSERT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory()), 0);
+  ASSERT_EQ(rtsp_listener_start(std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory(),makeTestPairingOptions()), 0);
   ASSERT_EQ(failed.wait_for(500ms), std::future_status::ready);
   EXPECT_EQ(failed.get(), EXIT_FAILURE);
   rtsp_listener_stop();
