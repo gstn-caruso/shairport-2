@@ -2,6 +2,8 @@
 #include "protocol/ap2/event_command_exchange.hpp"
 #include <expected>
 #include <functional>
+#include <condition_variable>
+#include <thread>
 
 class EventChannelInterrupt {
 public:
@@ -21,4 +23,12 @@ public:
   std::expected<void,int> start(int boundFd,EventCommandExchange &exchange,
                               ChannelFactory factory,std::function<void()> initialCommand);
   int stop();
+private:
+  void run();
+  std::mutex mutex_;
+  std::condition_variable joined_;
+  std::jthread thread_;
+  EventCommandExchange *exchange_ = nullptr;
+  int listener_ = -1,wake_ = -1,error_ = 0;
+  bool stopping_ = false,joining_ = false;
 };
