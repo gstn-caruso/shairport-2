@@ -31,8 +31,9 @@ export enum class ControlEffectKind {
 };
 export struct ControlEffect {
   ControlEffectKind kind = ControlEffectKind::initialized;
-  // Packet views are borrowed only until the caller overwrites its read storage.
+  // Retransmit/unknown views are borrowed until the caller overwrites its read storage.
   std::span<const std::uint8_t> bytes{};
+  std::size_t length = 0;
   std::int64_t elapsedNs = 0;
   bool sentinel = false;
   std::int32_t stream = 0,latency = 0;

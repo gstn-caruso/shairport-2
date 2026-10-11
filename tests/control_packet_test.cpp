@@ -50,7 +50,7 @@ TEST(ControlPacketCoordinator, FirstErrorInitializesAndShortPacketDoesNotDraw) {
   std::vector<uint8_t> shortPacket(27);
   auto malformed = coordinator.handle({shortPacket,0,1000000000},settings(),random);
   ASSERT_EQ(malformed.size(),1u); EXPECT_EQ(malformed[0].kind,ControlEffectKind::malformed);
-  EXPECT_EQ(malformed[0].bytes.size(),27u); EXPECT_EQ(draws,0u);
+  EXPECT_EQ(malformed[0].length,27u); EXPECT_TRUE(malformed[0].bytes.empty()); EXPECT_EQ(draws,0u);
 }
 TEST(ControlPacketCoordinator, StrictTwoMillisecondStaleGateAndSentinelBypassControlCounting) {
   ControlPacketCoordinator coordinator(1000000000);

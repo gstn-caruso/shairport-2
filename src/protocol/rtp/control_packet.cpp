@@ -39,7 +39,8 @@ ControlDecision ControlPacketCoordinator::handle(ControlRead read,ControlLiveSet
     decision.append(error); return decision;
   }
   if (read.bytes.size() < 28) {
-    decision.append({ControlEffectKind::malformed,read.bytes}); return decision;
+    ControlEffect malformed{ControlEffectKind::malformed}; malformed.length = read.bytes.size();
+    decision.append(malformed); return decision;
   }
   const auto elapsed = std::bit_cast<std::int64_t>(read.nowNs-startNs_);
   const bool sentinel = (read.bytes[0] & 0x10) != 0;

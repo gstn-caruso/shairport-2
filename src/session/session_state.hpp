@@ -82,7 +82,6 @@ struct SessionState : PrincipalParticipant {
 
   // this is what connects an rtp timestamp to the remote time
 
-  int udp_clock_is_initialised;
   int udp_clock_sender_is_initialised;
 
   RtpClock clock;
