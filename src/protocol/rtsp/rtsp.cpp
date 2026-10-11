@@ -2734,7 +2734,8 @@ static const char *format_address(struct sockaddr *fsa) {
 }
 */
 
-static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop) {
+static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop,
+                             const std::shared_ptr<SharedRtpTimingSettings> &timing) {
   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, nullptr);
   pthread_setname_np(pthread_self(), "listener");
   struct addrinfo hints, *info, *p;
@@ -2832,16 +2833,18 @@ static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop) {
         continue;
       }
 
-      rtsp_conn_info *conn = new (std::nothrow) rtsp_conn_info{};
-      if (conn == 0) {
+      std::unique_ptr<SessionState> unregistered;
+      try {
+        unregistered = SessionState::create(timing);
+      } catch (const std::bad_alloc &) {
         close(acceptedSocket);
         warn("Couldn't allocate memory for an rtsp_conn_info record.");
         exit_request(EXIT_FAILURE);
         break;
       }
+      auto *conn = unregistered.get();
       conn->fd = acceptedSocket;
       conn->remote = remote;
-      auto unregistered = std::unique_ptr<SessionState>(conn);
       conn->connection_number = RTSP_connection_index++;
       debug(2, "Connection %d is at: 0x%" PRIxPTR ".", conn->connection_number, (uintptr_t)conn);
 
@@ -2995,13 +2998,15 @@ static RtspListener &rtspListener() {
   return listener;
 }
 
-int rtsp_listener_start() {
+int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing) {
+  if (!timing)
+    return EINVAL;
   try {
     auto &listener = rtspListener();
     atexit(rtsp_listener_stop);
-    listener.start([&listener](std::stop_token stop) {
+    listener.start([&listener, timing = std::move(timing)](std::stop_token stop) {
       try {
-        rtsp_listen_loop(listener, stop);
+        rtsp_listen_loop(listener, stop, timing);
       } catch (const std::exception &error) {
         warn("RTSP listener failed: %s", error.what());
         exit_request(EXIT_FAILURE);

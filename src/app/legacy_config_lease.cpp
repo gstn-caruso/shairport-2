@@ -38,7 +38,6 @@ LegacyConfigLease::LegacyConfigLease(ReceiverSettings settings) : settings_(std:
   config.playback_mode = settings_.audio_.playback_mode;
   config.audio_backend_buffer_desired_length = settings_.audio_.audio_backend_buffer_desired_length;
   config.audio_backend_buffer_interpolation_threshold_in_seconds = settings_.audio_.audio_backend_buffer_interpolation_threshold_in_seconds;
-  config.audio_backend_latency_offset = settings_.audio_.audio_backend_latency_offset;
   config.audio_decoded_buffer_desired_length = settings_.audio_.audio_decoded_buffer_desired_length;
   config.audio_backend_silent_lead_in_time_auto = settings_.audio_.audio_backend_silent_lead_in_time_auto;
   config.audio_backend_silent_lead_in_time = settings_.audio_.audio_backend_silent_lead_in_time;

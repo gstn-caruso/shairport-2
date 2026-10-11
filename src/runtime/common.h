@@ -158,8 +158,6 @@ typedef struct {
                                                  // buffer
   double disable_standby_mode_silence_scan_interval; // check the threshold this often
 
-  double audio_backend_latency_offset; // this will be the offset in seconds to compensate for any
-                                       // fixed latency there might be in the audio path
   int audio_backend_silent_lead_in_time_auto; // true if the lead-in time should be from as soon as
                                               // packets are received
   double audio_backend_silent_lead_in_time; // the length of the silence that should precede a play.

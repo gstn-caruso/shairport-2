@@ -6,6 +6,7 @@
 #include "runtime/common.h"
 #include "playback/player.h"
 #include "timing/rtp_clock.hpp"
+#include "timing/shared_rtp_timing_settings.hpp"
 #include "audio/decoding/audio_decoder.hpp"
 #include "audio/format/audio_input_state.hpp"
 #include "audio/resampling/resampler.hpp"
@@ -22,6 +23,8 @@
 
 struct SessionState : PrincipalParticipant {
   SessionState() = default;
+  static std::unique_ptr<SessionState> create(std::shared_ptr<SharedRtpTimingSettings> timing);
+  SharedRtpTimingSettings &timingSettings() const { return *timingSettings_; }
   SessionState(const SessionState &) = delete;
   SessionState &operator=(const SessionState &) = delete;
   ~SessionState() override;
@@ -181,5 +184,7 @@ struct SessionState : PrincipalParticipant {
   void *dapo_private_storage; // this is used for compatibility, if dacp stuff isn't enabled.
 
 private:
+  std::shared_ptr<SharedRtpTimingSettings> timingSettings_ =
+      std::make_shared<SharedRtpTimingSettings>(0);
   std::atomic<bool> retiring_{false};
 };

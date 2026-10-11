@@ -63,7 +63,7 @@ TEST(ConfigurationLease, RetainsMappedStringsAndParsedTreeAfterSourceRemovalAndS
   EXPECT_EQ(config.debugger_show_elapsed_time, 1);
   EXPECT_EQ(config.debugger_show_relative_time, 0);
   EXPECT_DOUBLE_EQ(config.audio_backend_buffer_desired_length, 0.45);
-  EXPECT_DOUBLE_EQ(config.audio_backend_latency_offset, -0.04);
+  EXPECT_DOUBLE_EQ(lease.settings().audio().audio_backend_latency_offset, -0.04);
   EXPECT_EQ(config.packet_stuffing, ST_basic);
   EXPECT_EQ(config.playback_mode, ST_right_only);
   EXPECT_DOUBLE_EQ(config.default_airplay_volume, -15);
