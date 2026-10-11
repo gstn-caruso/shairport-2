@@ -79,4 +79,13 @@ TEST_F(PairingAdapter, TruncatedAddReturnsErrorWithoutMutation) {
   Bytes expected{6,1,2}; appendRecord(expected,"alpha",1);
   EXPECT_EQ(body(dispatch("/pair-list",{})),expected);
 }
+TEST_F(PairingAdapter, MissingAndWrongSizedKeyReturnErrorWithoutMutation) {
+  add("alpha",1);
+  auto missing = identifier("missing");
+  EXPECT_EQ(dispatch("/pair-add",missing).responseCode(),451);
+  auto wrong = identifier("wrong"); wrong.insert(wrong.end(),{3,1,8});
+  EXPECT_EQ(dispatch("/pair-add",wrong).responseCode(),451);
+  Bytes expected{6,1,2}; appendRecord(expected,"alpha",1);
+  EXPECT_EQ(body(dispatch("/pair-list",{})),expected);
+}
 }

@@ -912,7 +912,11 @@ static void pairing_remove(struct pairings *pairing) {
 }
 
 static int pairing_add_cb(uint8_t public_key[32], const char *device_id,
-                          void *cb_arg __attribute__((unused))) {
+                          void *cb_arg) {
+  if (!public_key) {
+    *static_cast<bool *>(cb_arg) = true;
+    return -1;
+  }
   debug(1, "pair-add cb for %s", device_id);
 
   struct pairings *pairing = pairing_find(device_id);
@@ -962,9 +966,11 @@ void handle_pair_add(rtsp_conn_info *conn __attribute__((unused)), RtspMessage *
   debug_log_rtsp_message_conn(conn, 1, "pair-add request", req);
   uint8_t *body = NULL;
   size_t body_len = 0;
-  int ret = pair_add(PAIR_SERVER_HOMEKIT, &body, &body_len, pairing_add_cb, NULL,
+  bool invalidKey = false;
+  int ret = pair_add(PAIR_SERVER_HOMEKIT, &body, &body_len, pairing_add_cb, &invalidKey,
                      (const uint8_t *)req->bodyData(), req->bodyLength());
-  if (ret < 0) {
+  if (ret < 0 || invalidKey) {
+    free(body);
     debug(1, "pair-add returned an error");
     resp->respondWith(451);
     return;
