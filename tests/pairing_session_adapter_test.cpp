@@ -86,3 +86,16 @@ TEST_F(PairingSessionAdapter, RealTransientExchangeReturnsPlaintextSetupAndPrepa
   EXPECT_TRUE(session.ap2_pairing_context.event_cipher_bundle.prepared());
   EXPECT_FALSE(session.ap2_pairing_context.control_cipher_bundle.responsesEncrypted());
 }
+
+TEST_F(PairingSessionAdapter, SeedBeforeSetupLeavesRemoteDataPortUnopened) {
+  session.airplay_stream_category = remote_control_stream;
+  session.connection_ip_family = AF_INET;
+  strcpy(session.self_ip_string,"127.0.0.1");
+  auto setup = plist_new_dict(); auto streams = plist_new_array(); auto stream = plist_new_dict();
+  plist_dict_set_item(stream,"seed",plist_new_uint(42));
+  plist_array_append_item(streams,stream); plist_dict_set_item(setup,"streams",streams);
+  RtspMessage request,response; request.request("SETUP"); replaceBodyWithPlist(request,setup); plist_free(setup);
+  rtsp_dispatch_request(&session,&request,&response);
+  EXPECT_EQ(response.responseCode(),200); EXPECT_EQ(session.local_data_port,0);
+  EXPECT_FALSE(session.ap2_pairing_context.data_cipher_bundle.prepared());
+}

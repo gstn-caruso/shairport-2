@@ -2152,7 +2152,8 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
             plist_get_uint_val(seed_item, &seed);
             char salt_suffix[256] = "";
             snprintf(salt_suffix, sizeof(salt_suffix), "%" PRIu64 "", seed);
-            if (conn->ap2_pairing_context.data_cipher_bundle.prepare(
+            if (conn->pair_setup_result && conn->pair_setup_result->shared_secret_len > 0 &&
+                conn->ap2_pairing_context.data_cipher_bundle.prepare(
                     PAIR_SERVER_HOMEKIT, 5,
                     {conn->pair_setup_result->shared_secret,conn->pair_setup_result->shared_secret_len},
                     salt_suffix, "DataStream")) {
