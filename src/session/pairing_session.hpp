@@ -17,7 +17,7 @@ struct PairingReply {
 };
 enum class DataPreparation { prepared, noSetupSecret, cipherFailed };
 
-// Setup/verify and channel IO are serialized by the owning runtime session.
+// Callers must serialize setup/verify, channel preparation and channel IO.
 // Borrowed channel references must not outlive this owner; join users before release.
 class PairingSession {
 public:

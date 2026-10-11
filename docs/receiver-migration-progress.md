@@ -1088,7 +1088,11 @@ configuration, or backend services.
 
 The seeded-SETUP safety fix requires an automated patch release, expected
 v6.1.16. Native pairing algorithms, verification authorization policy, and
-persistence are unchanged. Broader bundled C cleanup, live Home/re-pairing
+persistence are unchanged. Callers must serialize handshake/channel preparation
+with channel IO. Repeated setup can still replace the event cipher while its
+worker borrows it; the base revision has the same prepare/release path. This
+slice does not establish live re-pairing synchronization, which remains required
+migration work. Broader bundled C cleanup, live Home/re-pairing
 acceptance, other worker lifecycles, and performance measurements remain open.
 No installation or service restart was performed.
 
