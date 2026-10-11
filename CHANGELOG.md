@@ -1,3 +1,9 @@
+## [6.1.10](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.9...v6.1.10) (2026-10-11)
+
+### Bug Fixes
+
+* **rtp:** own resend transactions and snapshot control peers ([#65](https://github.com/gstn-caruso/shairport-sync/issues/65)) ([b74fa71](https://github.com/gstn-caruso/shairport-sync/commit/b74fa7112ae355893985dc498b636c8ef34ab608))
+
 ## [6.1.9](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.8...v6.1.9) (2026-10-11)
 
 ### Bug Fixes
