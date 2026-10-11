@@ -1,3 +1,9 @@
+## [6.1.16](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.15...v6.1.16) (2026-10-11)
+
+### Bug Fixes
+
+* **pairing:** own session contexts and guard data channel preparation ([#71](https://github.com/gstn-caruso/shairport-sync/issues/71)) ([1a06ea5](https://github.com/gstn-caruso/shairport-sync/commit/1a06ea54942ba9b9592269128f1ae68650d2082b))
+
 ## [6.1.15](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.14...v6.1.15) (2026-10-11)
 
 ### Bug Fixes
