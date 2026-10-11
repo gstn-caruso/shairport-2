@@ -37,7 +37,7 @@ static std::vector<uint8_t> controlTiming(uint32_t first,uint32_t second) {
   bigEndian(16,second,4); bigEndian(20,0x1122334455667788,8);
   return packet;
 }
-TEST(ControlPacketLegacy, SentinelD7PublishesBigEndianAnchorAndZeroesSharedOffsetOnce) {
+static void runControlPackets(bool includeInvalid) {
   anchors.clear(); RestoreControlSettings restore;
   config.audio_backend_buffer_desired_length = 0.1;
   config.audio_backend_latency_offset = -10;
@@ -58,11 +58,17 @@ TEST(ControlPacketLegacy, SentinelD7PublishesBigEndianAnchorAndZeroesSharedOffse
   pthread_t worker;
   ASSERT_EQ(pthread_create(&worker,nullptr,rtp_ap2_control_receiver,&session),0);
   for (uint32_t first : {100000u,200000u}) {
+    if (includeInvalid && first == 200000) {
+      const auto malformed = controlTiming(0,0x7fffffff);
+      EXPECT_EQ(send(client,malformed.data(),malformed.size(),MSG_NOSIGNAL),28);
+    }
     const auto packet = controlTiming(first,first+77175);
     EXPECT_EQ(send(client,packet.data(),packet.size(),MSG_NOSIGNAL),28);
   }
   bool arrived;
-  { std::unique_lock lock(anchorMutex); arrived = anchorChanged.wait_for(lock,std::chrono::seconds(1),[]{ return anchors.size() == 2; }); }
+  { std::unique_lock lock(anchorMutex); arrived = anchorChanged.wait_for(lock,std::chrono::seconds(1),[]{
+      return std::any_of(anchors.begin(),anchors.end(),[](auto anchor){ return anchor.frame == 188975; });
+    }); }
   EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0); close(client);
   ASSERT_TRUE(arrived); ASSERT_EQ(anchors.size(),2u);
   EXPECT_EQ(anchors[0].clock,0x1122334455667788u);
@@ -71,3 +77,5 @@ TEST(ControlPacketLegacy, SentinelD7PublishesBigEndianAnchorAndZeroesSharedOffse
   for (const auto &anchor : anchors) { EXPECT_EQ(anchor.latency,83790u); EXPECT_EQ(anchor.offset,0); EXPECT_EQ(anchor.warned,1); }
   EXPECT_EQ(session.ap2_control_socket,-1);
 }
+TEST(ControlPacketLegacy, SentinelD7PublishesBigEndianAnchorAndZeroesSharedOffsetOnce) { runControlPackets(false); }
+TEST(ControlPacketRuntime, InvalidTimingDoesNotPublishAnchorOrLatencyBeforeNextValidPacket) { runControlPackets(true); }

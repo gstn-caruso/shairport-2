@@ -55,6 +55,7 @@
 #include "platform/utilities/ffmpeg_api.h"
 #include <span>
 import receiver.protocol.ap2.realtime_audio;
+import receiver.protocol.ap2.control_packet;
 
 
 
@@ -485,39 +486,25 @@ void *rtp_ap2_control_receiver(void *arg) {
                   nctohl(packet + 16); // this seems to be the frame the time refers to
               check32conversion("frame_2", packet + 16, frame_2);
               // this updates the anchor information contained in the packet
-              int32_t stream_specified_latency = frame_2 - frame_1; // this is the latency expected
-              if (stream_specified_latency != 77175)
-                debug(1, "Stream-specified latency is %d frames. Normally it is 77175.", stream_specified_latency);
-              int32_t net_source_latency = stream_specified_latency + ap2_realttime_stream_latency_fudge_factor;
-
-              // Now to accommodate a backend buffer of the desired length.
-              // Note that it's in input-rate frames, not output-rate frames!
-
-              net_source_latency = net_source_latency - (int32_t)(config.audio_backend_buffer_desired_length *
-                                                    conn->inputAudio.sampleRate());
-
-              // Now we want to check the user-specified latency offset.
-
-              // We want to warn the user if they have asked for a negative latency that is too great --
-              // one that would require packets to arrive before they actually do,
-              // (which is about two seconds before they are to be played).
-
-              int32_t net_latency = net_source_latency + (int32_t)(config.audio_backend_latency_offset * conn->inputAudio.sampleRate());
-
-              if (net_latency <= 0) {
-                if (conn->latency_warning_issued == 0) {
-                  warn("The stream latency (%g seconds) is too short to accommodate an audio backend latency offset of "
-                       "%g seconds and a backend buffer of %g seconds. The audio_backend_latency_offset has been set to zero.",
-                       ((stream_specified_latency + ap2_realttime_stream_latency_fudge_factor) * 1.0) / conn->inputAudio.sampleRate(),
-                       config.audio_backend_latency_offset,
-                       config.audio_backend_buffer_desired_length);
-                  config.audio_backend_latency_offset = 0.0;
-                  net_latency = net_source_latency;
-                  conn->latency_warning_issued = 1;
-                }
+              const auto latency = ControlLatency::calculate(
+                  frame_1,frame_2,conn->inputAudio.sampleRate(),config.audio_backend_buffer_desired_length,
+                  config.audio_backend_latency_offset,conn->latency_warning_issued != 0);
+              if (!latency) {
+                debug(1,"Invalid AP2 control latency -- timing packet ignored.");
+                break;
               }
-              conn->latency = net_latency; // this is the time window within which packets can be accepted without being too late
-              set_ptp_anchor_info(conn, clock_id, frame_1 - ap2_realttime_stream_latency_fudge_factor, remote_packet_time_ns);
+              if (latency->stream != 77175)
+                debug(1,"Stream-specified latency is %d frames. Normally it is 77175.",latency->stream);
+              if (latency->warnAndZero) {
+                warn("The stream latency (%g seconds) is too short to accommodate an audio backend latency offset of "
+                     "%g seconds and a backend buffer of %g seconds. The audio_backend_latency_offset has been set to zero.",
+                     (static_cast<int64_t>(latency->stream)+11025)*1.0/conn->inputAudio.sampleRate(),
+                     config.audio_backend_latency_offset,config.audio_backend_buffer_desired_length);
+                config.audio_backend_latency_offset = 0;
+                conn->latency_warning_issued = 1;
+              }
+              conn->latency = static_cast<uint32_t>(latency->total);
+              set_ptp_anchor_info(conn,clock_id,frame_1-ap2_realttime_stream_latency_fudge_factor,remote_packet_time_ns);
 
             } break;
             case 0xd6:
