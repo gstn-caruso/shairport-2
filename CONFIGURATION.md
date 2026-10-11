@@ -11,8 +11,10 @@ defaults. Explicit missing or unreadable files fail. Invalid arguments exit 2;
 configuration or startup failures exit 1.
 
 Run under the systemd user service. Logs go to stderr for the journal. Restart
-after configuration changes. SIGTERM and SIGINT request shutdown; worker
-cancellation will migrate to cooperative stopping in the concurrency stage.
+after configuration changes. SIGTERM and SIGINT request shutdown. The listener,
+activity monitor, event worker and buffered TCP transport have owned cooperative
+stop paths; other workers still use cancellation. Whole-process cooperative
+shutdown remains migration work; see [the lifecycle map](docs/architecture.md#resource-retirement).
 
 Legacy setting flags are removed. Move supported settings to libconfig:
 
@@ -35,10 +37,12 @@ Use `--config PATH` instead of `-c` or `--configfile`; `--version` replaces `-V`
 Daemon/PID/control, backend-selection and syslog flags are unsupported. Use
 `journalctl --user -u shairport-sync` for diagnostics.
 
-The loader supplies an immutable settings snapshot to `ReceiverApplication`.
-Loading and runtime workers still use the legacy global configuration adapter;
-removing that representation belongs to the session/infrastructure stages.
-The settings snapshot does not imply complete resource ownership migration.
+`ConfigurationLoader` returns owned settings using explicit environment inputs.
+`ReceiverApplication` retains the process-lifetime compatibility lease for
+runtime consumers that still read global configuration. Shared timing settings,
+the pairing directory and immutable device-ID/PIN options are already passed
+explicitly through the listener to sessions. These boundaries do not imply
+complete resource/session encapsulation; see [migration status](docs/receiver-migration-progress.md).
 The popt library remains solely for existing subprocess-hook argument splitting;
 operational arguments use `StartupOptions`.
 

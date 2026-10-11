@@ -3,7 +3,8 @@
 ## CMake / C++26 build
 
 Use CMake 4.2 or newer, Ninja, Clang 23.1.3 (pinned in `.tool-versions`)
-and libstdc++ 15. CMake checks C++26 without GNU extensions by compiling and
+and libstdc++ 15. The matching `clang-scan-deps` must be installed beside Clang;
+the toolchain requires it for named C++ modules. CMake checks C++26 without GNU extensions by compiling and
 running `cmake/cpp26_probe.cpp`. All receiver production sources, including the
 entrypoint and generated plist, compile as C++26. The bundled NQPTP 1.2.8
 companion also builds from committed C++26 source with the same version and
@@ -67,6 +68,19 @@ fails. Full builds and CTest runs still cover the C adapters, linkage and shell
 contracts. Policy, clock, audio-format/mapping, PCM/samples and playback-timing
 targets use separate libraries; unrelated receiver changes do not relink their
 test executables. This improves targeted feedback rather than clean-build time.
+The [architecture guide](docs/architecture.md) also maps independent RTSP,
+buffered/control, transport, pairing and session targets to their dependencies.
+For example, directory policy tests link without receiver or crypto libraries,
+while the pairing session declares its native crypto dependencies:
+
+```sh
+cmake --build build/cmake --target pairing-directory-test pairing-session-test --parallel 2
+ctest --test-dir build/cmake -R '^(PairingDirectory|PairingSession.*)\.' --no-tests=error --output-on-failure
+```
+
+Module scanning is enabled on module targets and importing translation units.
+Do not substitute a `clang-scan-deps` from another LLVM version. Current results
+and native-cancellation limitations are recorded in [VALIDATION.md](VALIDATION.md).
 
 CI runs native amd64 CMake Release, Debug, ASan+UBSan and TSan builds,
 all with the same pinned compiler and library. Every build runs its contracts,
@@ -185,7 +199,12 @@ sudo apt install ./build/package/packages/shairport-sync_*.deb
 
 The package contains `/usr/bin/shairport-sync` and
 `/usr/bin/shairport-sync-nqptp`, both service units, the manual, license notices,
-configuration documentation and `/etc/shairport-sync.conf.sample`. Copy the
+the current operation/architecture/validation guides, historical evidence and
+`/etc/shairport-sync.conf.sample`. The documentation bundle is installed under
+`/usr/share/doc/shairport-sync`; its build examples and source navigation assume
+a repository checkout. Published v6.1.16 assets predate this documentation
+refresh; subsequent source/CI packages include the expanded guide bundle.
+Existing published binaries are not replaced. Copy the
 sample to `/etc/shairport-sync.conf` and configure it before starting. The
 packaged system unit uses `/usr/bin/shairport-sync-nqptp`; activate it first with
 `sudo systemctl enable --now shairport-sync-nqptp`. The packaged user unit uses
@@ -220,10 +239,9 @@ architecture metadata. Release binaries use the package version instead of a
 Git description. Release jobs are serialized; superseded runs skip publication
 so a later validated push covers their commits.
 
-For the initial rollout, tag the last pre-automation `master` commit
-`3740f383` as `v5.5.1` before merging this workflow. This establishes the existing
-version baseline; a feature then releases 5.6.0 rather than starting at 1.0.0.
-Do not increment `VERSION` manually for subsequent changes. Release tooling is
+The initial automation baseline was established as `v5.5.1` at `3740f383`;
+that rollout is complete. Do not recreate or move that tag, or increment
+`VERSION` manually for subsequent changes. Release tooling is
 pinned by `.github/release/package-lock.json`; reproduce its policy checks with
 `npm ci --prefix .github/release` and `npm test --prefix .github/release`.
 
@@ -310,7 +328,7 @@ Do not use `--clobber`, delete a published release, or replace
 published binaries with a differing rebuild. Verify the final tag, release,
 version and downloaded checksums before declaring recovery complete.
 
-Release tooling currently has 15 upstream dependency audit advisories, including
-the commit-analyzer's `micromatch`/`braces` chain and bundled npm dependencies.
-Check with `npm audit --prefix .github/release`; the pinned latest tooling and
-safe automatic fixes did not resolve these advisories at initial rollout.
+Audit the pinned release dependencies with `npm audit --prefix .github/release`.
+The initial rollout recorded unresolved advisories; that historical count is
+not a current audit result. Follow the lockfile and reported advisory paths
+when assessing an update.

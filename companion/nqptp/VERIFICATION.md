@@ -1,5 +1,19 @@
 # Verification evidence
 
+## Current delivery status
+
+The companion was delivered in PR45 and release v6.1.0. It remains bundled in
+the verified v6.1.16 receiver release; all four post-merge CI profiles and package
+checks passed. See [current validation](../../VALIDATION.md) and
+[architecture](../../docs/architecture.md) for the repository-wide state.
+
+The implementation log below is historical: its branch/worktree, old counts,
+local paths and pending-publication statement describe the original checkpoints.
+They do not mean delivery or CI is still pending. Upstream identity/provenance
+and the isolated-versus-device validation limits remain unchanged.
+
+## Historical implementation log
+
 Branch: `feat/bundled-nqptp`, based on `origin/master` at `6c26b8b7`.
 Fresh Release baseline: pinned Clang 23.1.3 / C++26, 331/331 tests passed
 in 14.56 seconds. The user's explicitly requested worktree is isolated from
