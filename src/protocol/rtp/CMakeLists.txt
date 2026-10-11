@@ -6,3 +6,8 @@ set_target_properties(receiver-realtime-audio PROPERTIES CXX_SCAN_FOR_MODULES ON
 target_compile_options(receiver-realtime-audio PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
 target_link_libraries(receiver-realtime-audio PUBLIC PkgConfig::SODIUM)
 target_link_libraries(receiver PUBLIC receiver-realtime-audio)
+add_library(receiver-control-packet STATIC control_packet.cpp)
+target_sources(receiver-control-packet PUBLIC FILE_SET CXX_MODULES FILES control_packet.cppm)
+set_target_properties(receiver-control-packet PROPERTIES CXX_SCAN_FOR_MODULES ON)
+target_compile_options(receiver-control-packet PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
+target_link_libraries(receiver PUBLIC receiver-control-packet)
