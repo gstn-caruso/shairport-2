@@ -60,9 +60,8 @@ ssize_t ap2_event_port_send_message(rtsp_conn_info *conn, char *data, size_t dat
       debug(3, "Connection %d: Packet of %zu bytes successfully read on the Event Port.",
             conn->connection_number, result);
       if (result > 0) {
-        packet[result] = '\0';
-        debug(3, "Connection %d: Packet Received on Event Port with contents: \n--\n%s\n--\n",
-              conn->connection_number, packet);
+        debug(3, "Connection %d: Packet Received on Event Port with contents: \n--\n%.*s\n--\n",
+              conn->connection_number, static_cast<int>(result), reinterpret_cast<char *>(packet));
       } else {
         debug(2, "Connection %d: Event Port connection closed by client", conn->connection_number);
       }
