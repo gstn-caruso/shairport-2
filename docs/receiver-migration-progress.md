@@ -535,10 +535,10 @@ wraps as before. D6 and unknown actions borrow the current packet only until
 the next read; malformed diagnostics own their byte count. Eight bounded slots
 hold ordered effects without a heap-backed event list.
 
-Backend buffer/offset and the session warning flag remain live per-packet inputs.
-Warning/zero-offset effects retain the compatibility write to shared configuration,
-and an already-issued warning retains a negative calculated latency. This shared
-offset and runtime peer ownership remain migration gaps. RTSP starts the control
+Backend buffer and the session warning flag remain live per-packet inputs.
+An already-issued warning retains a negative calculated latency. The following
+timing-ownership slice replaces the original compatibility offset write; runtime
+peer ownership remains a migration gap. RTSP starts the control
 worker before optional input sample-rate setup, so finite zero-rate early anchors
 remain valid: normal stream latency stays 88200, with no warning/offset change.
 Zero-rate nonpositive warning diagnostics represent infinity/NaN explicitly while
@@ -567,6 +567,52 @@ preserved under `/tmp/control-coordinator-*`; review and hosted CI remain pendin
 Shared configuration isolation, full cooperative worker shutdown, device acceptance,
 and controlled performance measurements remain open. No package installation or
 live restart was performed.
+
+The shared RTP timing slice applies Feature Envy (#77):
+`SharedRtpTimingSettings` owns the process-wide live offset and its one-way
+disable operation. Its ordinary header and independently linked standard-library
+target use `atomic<double>`; no global settings accessor is introduced.
+The immutable `ReceiverSettings` initial offset remains parsed and logged, but
+the mutable compatibility field and lease copy are removed. Remaining
+`config.audio_backend_latency_offset` references belong only to the loader's
+private `ParsedConfig`, not the runtime global.
+
+Application startup creates an explicit shared owner before starting the listener.
+The listener captures ownership and passes the same owner to accepted sessions.
+`SessionState::create` value-initializes the existing defaulted constructor before
+binding its private shared pointer, preserving raw null/zero fields and fd=-1.
+Default isolated sessions each own fresh zero settings. Existing and later
+sessions observe a control warning's disable, while independent owners are
+unchanged; a session can retain its owner after the listener stops.
+
+A native control-worker/concurrent second-session clock-conversion test produced
+an actual TSan race between the original `rtp.cpp` control write and anchor read.
+The atomic owner now makes that same production-path regression pass. Forward
+and reverse production clock conversions observe initial offset and disabled
+offset correctly. This is a race fix requiring `fix` classification and the
+automated patch release expected v6.1.9; VERSION is not changed manually.
+
+The Release baseline passes 597/597 in 17.66 seconds; the final suite passes
+606/606 in 17.79 seconds. ASan+UBSan passes 62/62 focused cases in 2.50 seconds,
+and TSan passes 62/62 in 3.30 seconds. The independent settings executable links
+only its component and GoogleTest; its production object contains both profiles'
+instrumentation. Red/green, full/focused, link, and instrumentation logs remain
+under `/tmp/shared-rtp-timing-*` for review.
+
+The first listener lifetime fixture cancelled a native conversation blocked in
+socket read and produced TSan registry-cleanup reports, preserved separately in
+`shared-rtp-timing-tsan-native-cancellation-initial.log`. Both reported registry
+accesses use the same mutex. Existing `cancellation_wait.hpp` documents LLVM
+23.1.3 cancellation interceptor state limitations; the warning is not evidence
+of an offset-owner race. The ownership fixture now closes the peer and waits for
+actual conversation completion before listener stop, without suppressions or
+production changes. Native conversation cancellation cleanup remains a
+verification limit; existing focused session cancellation tests remain green.
+
+The per-session warning flag and other compatibility configuration remain outside
+this slice. Full cooperative worker shutdown, device acceptance, controlled
+performance measurement, and whole-goal completion remain open. No installation
+or live restart was performed.
 
 Each delivered PR received independent review and passed all four AMD64 CI
 configurations before merge. The Stage 1 work includes a non-silent stereo ALAC
