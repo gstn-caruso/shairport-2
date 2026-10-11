@@ -787,6 +787,18 @@ independent close, full/focused checks, link, and instrumentation. The fixes
 require `fix` classification and automated patch release expected v6.1.12;
 VERSION remains 6.1.11 pending release automation.
 
+The review follow-up enables the actual runtime reply diagnostic at debug level
+3 through `ap2_event_port_post_command`, using an initialized 4096-byte plaintext
+reply. It verifies the returned count and exactly bounded output, then verifies
+that an embedded NUL still clips diagnostic text without changing the count.
+Temporarily restoring unbounded `%s` logging produced an ASan read of 4097 bytes
+past the reply allocation; the original production source was restored
+byte-for-byte afterward. Evidence is retained in
+`/tmp/event-command-review-asan-red-report.2366636` and the review green logs.
+All 15 event-focused cases pass in Release, ASan+UBSan, and TSan with the existing
+cancellation limitation stated above. Full Release now passes 645/645 in 18.33
+seconds. This follow-up changes only the test and this evidence record.
+
 Close may wait on blocking IO as the old mutex did; cancellation and joins are
 still required. Event listener/thread ownership, complete cooperative shutdown,
 runtime info/global settings, device acceptance, performance measurement, and

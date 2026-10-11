@@ -1,6 +1,7 @@
 #include "session/session_state.hpp"
 #include "protocol/rtsp/rtsp.h"
 #include "protocol/ap2/native_event_channel.hpp"
+#include "platform/utilities/debug.h"
 #include <gtest/gtest.h>
 #include <array>
 #include <thread>
@@ -60,6 +61,45 @@ TEST(EventCommandRuntime, ReceiverAttachesAcceptedDescriptorZeroAndCleanupCloses
 }
 
 ssize_t ap2_event_port_post_command(rtsp_conn_info *,plist_t);
+class RuntimeDiagnosticReplyChannel final : public EventPlaintextChannel {
+public:
+  explicit RuntimeDiagnosticReplyChannel(bool embeddedNull) {
+    reply_.fill('R'); if (embeddedNull) reply_[3] = 0;
+  }
+  std::ptrdiff_t write(std::span<const uint8_t> bytes) override { return bytes.size(); }
+  std::ptrdiff_t read(std::span<uint8_t> bytes) override {
+    EXPECT_EQ(bytes.size(),reply_.size());
+    std::copy(reply_.begin(),reply_.end(),bytes.begin()); return reply_.size();
+  }
+private:
+  std::array<uint8_t,4096> reply_;
+};
+
+TEST(EventCommandRuntime, ActualReplyDiagnosticBoundsFullCapacityAndStopsAtFirstNull) {
+  struct RestoreDebugLevel {
+    int previous = debug_level();
+    ~RestoreDebugLevel() { set_debug_level(previous); }
+  } restore;
+  set_debug_level(3);
+  for (bool embeddedNull : {false,true}) {
+    SessionState session{};
+    ASSERT_TRUE(session.eventCommandExchange.attach(std::make_unique<RuntimeDiagnosticReplyChannel>(embeddedNull)));
+    auto command = plist_new_string("ordinary command");
+    testing::internal::CaptureStderr();
+    const auto count = ap2_event_port_post_command(&session,command);
+    const auto output = testing::internal::GetCapturedStderr();
+    plist_free(command);
+    EXPECT_EQ(count,4096);
+    const std::string marker = "Packet Received on Event Port with contents: \n--\n";
+    const auto start = output.find(marker);
+    ASSERT_NE(start,std::string::npos);
+    const auto body = start+marker.size();
+    const auto end = output.find("\n--\n",body);
+    ASSERT_NE(end,std::string::npos);
+    EXPECT_EQ(output.substr(body,end-body),std::string(embeddedNull ? 3 : 4096,'R'));
+  }
+}
+
 TEST(NativeEventChannel, CloseOwnsAcceptedFdWithoutAccessingReleasedCipher) {
   int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
   pair_cipher_bundle cipher{};
