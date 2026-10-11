@@ -37,9 +37,9 @@ export default {
 test "$RELEASE_VERSION" = '<%= nextRelease.version %>'
 set -- build/release/packages/*.deb
 test "$#" -eq 1
-package="build/release/packages/shairport-sync_<%= nextRelease.version %>_amd64.deb"
+package="build/release/packages/shairport-2_<%= nextRelease.version %>_amd64.deb"
 test -f "$package"
-test "$(dpkg-deb -f "$package" Package)" = shairport-sync
+test "$(dpkg-deb -f "$package" Package)" = shairport-2
 test "$(dpkg-deb -f "$package" Version)" = '<%= nextRelease.version %>'
 test "$(dpkg-deb -f "$package" Architecture)" = amd64
 (cd build/release/packages && sha256sum *.deb > SHA256SUMS)

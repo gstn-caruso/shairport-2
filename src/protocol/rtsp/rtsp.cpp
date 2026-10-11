@@ -1825,7 +1825,7 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
         } else {
           debug(1, "SETUP on Connection %d: an unrecognised \"%s\" setup detected.",
                 conn->connection_number, timingProtocolString);
-          warn("Shairport Sync can not handle streams of this type: \"%s\".", timingProtocolString);
+          warn("shairport-2 can not handle streams of this type: \"%s\".", timingProtocolString);
         }
         free(timingProtocolString);
       } else {
@@ -2679,7 +2679,7 @@ static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop,
                 conn->self_ip_string, conn->self_rtsp_port);
           conn->connection_start_time = get_absolute_time_in_ns();
         } else {
-          debug(1, "Error figuring out Shairport Sync's own IP number.");
+          debug(1, "Error figuring out shairport-2's own IP number.");
         }
 
         const int connectionNumber = conn->connection_number;
@@ -2708,7 +2708,7 @@ static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop,
     }
   } else if (!stop.stop_requested()) {
     warn("could not establish a service on port %d -- program terminating. Is another instance of "
-        "Shairport Sync running on this device?",
+        "shairport-2 running on this device?",
         config.port);
     exit_request(EXIT_FAILURE);
   }

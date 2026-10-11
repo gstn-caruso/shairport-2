@@ -121,7 +121,7 @@ leaks. Leak detection remains enabled. A TSan runtime startup failure caused by
 host address-space or sandbox restrictions is failed infrastructure validation;
 it does not establish the absence of data races.
 
-Run the bundled `shairport-sync-nqptp` timing companion (SMI10) and Avahi as
+Run the bundled `shairport-2-nqptp` timing companion (SMI10) and Avahi as
 system services. Start a PulseAudio-compatible user session. PipeWire users
 should run `pipewire-pulse`; the native PipeWire backend is not provided.
 Installation ships both units without enabling or starting them. Copy and
@@ -130,9 +130,9 @@ companion first, then the receiver from the audio user's session:
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now shairport-sync-nqptp
+sudo systemctl enable --now shairport-2-nqptp
 systemctl --user daemon-reload
-systemctl --user enable --now shairport-sync
+systemctl --user enable --now shairport-2
 ```
 
 The system companion uses a dynamic user, `CAP_NET_BIND_SERVICE` and the
@@ -141,6 +141,58 @@ loopback UDP 9000 and the `/nqptp` shared-memory object. There is no dependency
 between the system and user systemd managers. The receiver remains in the
 PulseAudio-compatible user's session. Avahi must also be running before the
 receiver starts.
+
+### Migrating from shairport-sync
+
+The project is now `shairport-2`, at
+<https://github.com/gstn-caruso/shairport-2>. The receiver, timing companion,
+Debian package and service units have new names. Configuration defaults to
+`/etc/shairport-2.conf` in Debian packages; the old configuration is not read
+automatically. The AirPlay model identifier, timing ports
+and `/nqptp` shared-memory interface retain their compatibility identities.
+
+1. Inspect the old installation before changing it. Run
+   `systemctl --user status shairport-sync` as each audio-session owner and
+   `sudo systemctl status shairport-sync shairport-sync-nqptp nqptp` for system
+   units. Stop and disable the old units that exist; for the previous bundled
+   installation, use `systemctl --user disable --now shairport-sync` and
+   `sudo systemctl disable --now shairport-sync-nqptp`. Stop any manually
+   launched receiver or timing companion too. An older system receiver uses
+   `sudo systemctl disable --now shairport-sync`. Keep custom units and
+   drop-ins for reference; the new service names need their own configuration.
+2. Preserve the existing configuration. For the packaged default, run
+   `sudo cp --archive --no-clobber /etc/shairport-sync.conf /etc/shairport-sync.conf.pre-shairport-2`
+   and `sudo cp --archive --no-clobber /etc/shairport-sync.conf /etc/shairport-2.conf`.
+   Inspect an existing destination instead of overwriting it. Source installs
+   may use `/usr/local/etc`; use the actual old and new configuration directories.
+   If the old unit used `--config`, migrate that file and update the new unit's
+   explicit path. Pairing records are in-memory; verify reconnection and Home
+   pairing manually after the upgrade.
+3. For Debian installations, inspect `dpkg-query -W shairport-sync`, remove
+   the old package with `sudo apt remove shairport-sync` after stopping its
+   services, then install the new `shairport-2_*.deb` as described below.
+   Use removal without purge to preserve local configuration. Source installs
+   should stage and inspect the new files before installing; review the old
+   build's install manifest before removing obsolete files. The package does
+   not migrate configuration, remove old source-installed binaries or activate
+   services. Update command wrappers, monitoring and custom unit paths from
+   `shairport-sync` to `shairport-2` and the companion likewise.
+4. Compare the preserved configuration with `scripts/shairport-2.conf` and
+   follow [configuration migration](CONFIGURATION.md). Run
+   `shairport-2 --check-config --config /etc/shairport-2.conf` before activation.
+   Set `pulseaudio.application_name = "shairport-2"` if the copied configuration
+   retains the previous display label. Keep `general.name` to preserve the
+   receiver name shown to senders. Run `shairport-2 --version` and
+   `shairport-2-nqptp --version` to verify matching receiver release versions.
+5. Reload both systemd managers, start `shairport-2-nqptp` first, then enable
+   `shairport-2` in the audio user's session using the commands above. Check
+   both journals and manually verify AirPlay playback. Do not run the old and
+   new timing companions together: their sockets and shared memory overlap.
+
+If the checkout directory changed, create a fresh CMake build directory. Old
+CMake caches contain absolute paths to the previous checkout. Update local
+shortcuts and Git remotes as needed; do not reuse a stale build or install manifest
+as evidence of the new installation.
 
 ### Migrating a separately installed NQPTP
 
@@ -156,22 +208,22 @@ and startup fails rather than overwriting it. Normal shutdown removes the
 companion's own object. After an unclean termination, confirm that all NQPTP
 processes and any service owning it are stopped before manually removing the
 stale `/dev/shm/nqptp` object, then start the companion again. Check
-`sudo journalctl -u shairport-sync-nqptp` for binding or mapping failures.
+`sudo journalctl -u shairport-2-nqptp` for binding or mapping failures.
 
 After every companion restart, restart the receiver with
-`systemctl --user restart shairport-sync` so it remaps shared memory. The old
+`systemctl --user restart shairport-2` so it remaps shared memory. The old
 mapping can retain an obsolete clock even after its object is unlinked.
 Real AirPlay playback, multiroom synchronization and privileged activation
 remain manual acceptance checks on a designated test host; isolated tests
 verify sockets, timing samples and mapping behavior only.
 
-Copy `shairport-sync.conf.sample` to `shairport-sync.conf` and edit it before
+Copy `shairport-2.conf.sample` to `shairport-2.conf` and edit it before
 starting the receiver. When migrating an existing configuration, see
 [CONFIGURATION.md](CONFIGURATION.md) for unsupported settings.
 
-From the repository root, `./user-service-install.sh --dry-run` previews user service installation. `./user-service-install.sh` installs and starts the unit for your current user. Its default executable path is `/usr/local/bin/shairport-sync`; edit the unit if you chose another prefix. Do not run the installer as root. NQPTP and Avahi must already be running.
+From the repository root, `./user-service-install.sh --dry-run` previews user service installation. `./user-service-install.sh` installs and starts the unit for your current user. Its default executable path is `/usr/local/bin/shairport-2`; edit the unit if you chose another prefix. Do not run the installer as root. NQPTP and Avahi must already be running.
 
-`systemctl --user status shairport-sync` and `journalctl --user -u shairport-sync` show receiver status and logs. The unit does not create a system account or install a system-wide receiver service.
+`systemctl --user status shairport-2` and `journalctl --user -u shairport-2` show receiver status and logs. The unit does not create a system account or install a system-wide receiver service.
 
 ## Debian packages and releases
 
@@ -195,23 +247,23 @@ cmake -S . -B build/package -G Ninja \
 cmake --build build/package --parallel 2
 ctest --test-dir build/package --no-tests=error --output-on-failure
 cpack --config build/package/CPackConfig.cmake -B build/package/packages
-sudo apt install ./build/package/packages/shairport-sync_*.deb
+sudo apt install ./build/package/packages/shairport-2_*.deb
 ```
 
-The package contains `/usr/bin/shairport-sync` and
-`/usr/bin/shairport-sync-nqptp`, both service units, the manual, license notices,
+The package contains `/usr/bin/shairport-2` and
+`/usr/bin/shairport-2-nqptp`, both service units, the manual, license notices,
 the README, build/configuration/architecture guides, generated changelog and
-`/etc/shairport-sync.conf.sample`. The documentation bundle is installed under
-`/usr/share/doc/shairport-sync`; its build examples and source navigation assume
+`/etc/shairport-2.conf.sample`. The documentation bundle is installed under
+`/usr/share/doc/shairport-2`; its build examples and source navigation assume
 a repository checkout. Copy the
-sample to `/etc/shairport-sync.conf` and configure it before starting. The
-packaged system unit uses `/usr/bin/shairport-sync-nqptp`; activate it first with
-`sudo systemctl enable --now shairport-sync-nqptp`. The packaged user unit uses
-`/usr/bin/shairport-sync`; enable it with `systemctl --user enable --now shairport-sync`
+sample to `/etc/shairport-2.conf` and configure it before starting. The
+packaged system unit uses `/usr/bin/shairport-2-nqptp`; activate it first with
+`sudo systemctl enable --now shairport-2-nqptp`. The packaged user unit uses
+`/usr/bin/shairport-2`; enable it with `systemctl --user enable --now shairport-2`
 from the PulseAudio user's session after starting the companion and Avahi.
 Companion provenance and GPLv2 notices are installed under
-`/usr/share/doc/shairport-sync/nqptp/`. Remove any older user-unit override that still
-points to `/usr/local/bin/shairport-sync`.
+`/usr/share/doc/shairport-2/nqptp/`. Remove any older user-unit override that still
+points to `/usr/local/bin/shairport-2`.
 
 Pushes to `master` or `main`, including merged PRs, run the same validation.
 Before native builds, semantic-release performs a dry run to select the version

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-binary=${1:-./shairport-sync}
+binary=${1:-./shairport-2}
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
 cc -shared -fPIC -I"$source_dir/src" "$source_dir/tests/nqptp_fixture.c" -o "$test_dir/fixture.so"

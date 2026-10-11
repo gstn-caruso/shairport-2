@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-binary=${1:-./shairport-sync}
+binary=${1:-./shairport-2}
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
 check_rejection() {

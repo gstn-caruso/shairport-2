@@ -18,8 +18,8 @@ const fixture = () => {
 const packageFor = (cwd, architecture, packageVersion = version, filenameArchitecture = architecture) => {
   const root = join(cwd, `fixture-${filenameArchitecture}`);
   mkdirSync(join(root, 'DEBIAN'), {recursive: true});
-  writeFileSync(join(root, 'DEBIAN/control'), `Package: shairport-sync\nVersion: ${packageVersion}\nArchitecture: ${architecture}\nMaintainer: Test <test@example.com>\nDescription: Release fixture\n`);
-  execFileSync('dpkg-deb', ['--build', root, join(cwd, 'build/release/packages', `shairport-sync_${version}_${filenameArchitecture}.deb`)], {stdio: 'pipe'});
+  writeFileSync(join(root, 'DEBIAN/control'), `Package: shairport-2\nVersion: ${packageVersion}\nArchitecture: ${architecture}\nMaintainer: Test <test@example.com>\nDescription: Release fixture\n`);
+  execFileSync('dpkg-deb', ['--build', root, join(cwd, 'build/release/packages', `shairport-2_${version}_${filenameArchitecture}.deb`)], {stdio: 'pipe'});
 };
 const silentOutput = () => new Writable({write(chunk, encoding, callback) { callback(); }});
 const context = cwd => ({cwd, env: {...process.env, RELEASE_VERSION: version}, nextRelease: {version}, logger: {log() {}}, stdout: silentOutput(), stderr: silentOutput()});

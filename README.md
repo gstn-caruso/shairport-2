@@ -1,4 +1,4 @@
-# Shairport Sync
+# shairport-2
 
 [![CI](https://github.com/gstn-caruso/shairport-2/actions/workflows/receiver.yml/badge.svg)](https://github.com/gstn-caruso/shairport-2/actions/workflows/receiver.yml)
 [![Release](https://img.shields.io/github/v/release/gstn-caruso/shairport-2)](https://github.com/gstn-caruso/shairport-2/releases)
@@ -52,33 +52,35 @@ Inspect the staged files before installing on the host:
 
 ```sh
 sudo cmake --install build/cmake
-sudo cp --no-clobber /etc/shairport-sync.conf.sample /etc/shairport-sync.conf
+sudo cp --no-clobber /etc/shairport-2.conf.sample /etc/shairport-2.conf
 ```
 
-[BUILD.md](BUILD.md) covers dependencies, Debian packages and upgrades from a
+[BUILD.md](BUILD.md#migrating-from-shairport-sync) covers the program rename,
+configuration preservation and service upgrades. It also covers dependencies,
+Debian packages and upgrades from a
 standalone timing companion. Stop an older timing service before activating
 the bundled one; they use the same ports and shared memory.
 
 ## Configure and play
 
-Edit `/etc/shairport-sync.conf` using the
-[sample configuration](scripts/shairport-sync.conf). Set `general.name` for the
+Edit `/etc/shairport-2.conf` using the
+[sample configuration](scripts/shairport-2.conf). Set `general.name` for the
 advertised name and optionally `pulseaudio.sink` for the audio destination.
 Make sure Avahi and the user's PulseAudio-compatible session are running.
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now shairport-sync-nqptp
+sudo systemctl enable --now shairport-2-nqptp
 systemctl --user daemon-reload
-systemctl --user enable --now shairport-sync
+systemctl --user enable --now shairport-2
 ```
 
 Select the receiver in your device's AirPlay output picker and start playback.
 After changing configuration or restarting the timing companion, restart the
-receiver with `systemctl --user restart shairport-sync`.
+receiver with `systemctl --user restart shairport-2`.
 
-If startup or playback fails, use `journalctl --user -u shairport-sync` and
-`sudo journalctl -u shairport-sync-nqptp`. Follow
+If startup or playback fails, use `journalctl --user -u shairport-2` and
+`sudo journalctl -u shairport-2-nqptp`. Follow
 [configuration and troubleshooting](CONFIGURATION.md) for audio, discovery,
 Home pairing and migration checks.
 

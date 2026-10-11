@@ -1,4 +1,5 @@
 /shairport-sync
+/shairport-2
 /shairport-sync.exe
 /shairport-sync-dbus-test-client
 /shairport-sync-mpris-test-client
@@ -9,6 +10,7 @@
 scripts/shairport-sync.service
 scripts/shairport-sync
 shairport-sync.core
+shairport-2.core
 
 #Some dbus files that are automatically generated
 /org.gnome.ShairportSync.service

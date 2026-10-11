@@ -101,10 +101,11 @@ jobs:
       - name: Verify staged install
         run: |
           DESTDIR="$PWD/build/cmake/stage" cmake --install build/cmake
-          test -f build/cmake/stage/usr/bin/shairport-sync
-          cmp man/shairport-sync.1 build/cmake/stage/usr/share/man/man1/shairport-sync.1
-          cmp scripts/shairport-sync.conf build/cmake/stage/etc/shairport-sync.conf.sample
-          test -f build/cmake/stage/usr/lib/systemd/user/shairport-sync.service
+          test -f build/cmake/stage/usr/bin/shairport-2
+          cmp man/shairport-2.1 build/cmake/stage/usr/share/man/man1/shairport-2.1
+          cmp scripts/shairport-2.conf build/cmake/stage/etc/shairport-2.conf.sample
+          test -f build/cmake/stage/usr/lib/systemd/user/shairport-2.service
+          cmake -DROOT="$PWD/build/cmake/stage" -DPREFIX=/usr -P tests/program_identity_test.cmake
           cmake -DROOT="$PWD/build/cmake/stage" -DPREFIX=/usr -DVERSION="$(cat VERSION)" -P tests/nqptp_package_test.cmake
           cmake -DROOT="$PWD/build/cmake/stage" -DPREFIX=/usr -P tests/nqptp_unit_test.cmake
       - name: Build Debian package
@@ -117,9 +118,10 @@ jobs:
           version=$(cat VERSION)
           test "$(dpkg-deb -f build/cmake/packages/*.deb Version)" = "$version"
           test "$(dpkg-deb -f build/cmake/packages/*.deb Architecture)" = '${{ matrix.platform.architecture }}'
-          build/cmake/package-check/usr/bin/shairport-sync --version | grep -F "$version-AirPlay2-"
-          build/cmake/package-check/usr/bin/shairport-sync --check-config --config build/cmake/package-check/etc/shairport-sync.conf.sample
-          cmake -DROOT="$PWD/build/cmake/package-check" -DPREFIX=/usr -DVERSION="$version" -DPACKAGE="$PWD/build/cmake/packages/shairport-sync_${version}_${{ matrix.platform.architecture }}.deb" -P tests/nqptp_package_test.cmake
+          build/cmake/package-check/usr/bin/shairport-2 --version | grep -F "$version-AirPlay2-"
+          build/cmake/package-check/usr/bin/shairport-2 --check-config --config build/cmake/package-check/etc/shairport-2.conf.sample
+          cmake -DROOT="$PWD/build/cmake/package-check" -DPREFIX=/usr -DVERSION="$version" -DPACKAGE="$PWD/build/cmake/packages/shairport-2_${version}_${{ matrix.platform.architecture }}.deb" -P tests/nqptp_package_test.cmake
+          cmake -DROOT="$PWD/build/cmake/package-check" -DPREFIX=/usr -DPACKAGE="$PWD/build/cmake/packages/shairport-2_${version}_${{ matrix.platform.architecture }}.deb" -P tests/program_identity_test.cmake
       - name: Upload Debian package
         if: matrix.build == 'Release'
         uses: actions/upload-artifact@v4
@@ -153,7 +155,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: shairport-sync-release
+      group: shairport-2-release
       cancel-in-progress: false
     env:
       RELEASE_VERSION: ${{ needs.plan.outputs.version }}

@@ -264,7 +264,7 @@ void _display_config(const char *filename, const int linenumber, __attribute__((
   char *version_string = get_version_string();
   if (version_string) {
     _inform(filename, linenumber, "");
-    _inform(filename, linenumber, "Shairport Sync Version String:");
+    _inform(filename, linenumber, "shairport-2 Version String:");
     _inform(filename, linenumber, " %s", version_string);
     free(version_string);
   } else {
@@ -435,7 +435,7 @@ const char *av_channel_layout_name(uint64_t channel_layout) {
 
 static ConfigurationEnvironment configurationEnvironment(const StartupOptions &options) {
   ConfigurationEnvironment environment;
-  environment.defaultPath = std::string(SYSCONFDIR) + "/shairport-sync.conf";
+  environment.defaultPath = std::string(SYSCONFDIR) + "/shairport-2.conf";
   char hostname[256]{};
   gethostname(hostname, sizeof(hostname) - 1);
   environment.hostname = hostname;
@@ -571,7 +571,7 @@ int ReceiverApplication::run(ReceiverSettings settings) {
   r64init(0);
   const auto *firstBackend = audio_get_output(nullptr);
   if (!firstBackend)
-    die("No audio backend found! Check your build of Shairport Sync.");
+    die("No audio backend found! Check your build of shairport-2.");
   strncpy(first_backend_name, firstBackend->name, sizeof(first_backend_name) - 1);
   config.output_name = first_backend_name;
   sharedVolumeLevel.remember(AirPlayVolume{config.default_airplay_volume});
@@ -589,7 +589,7 @@ int ReceiverApplication::run(ReceiverSettings settings) {
 
 
     if (has_fltp_capable_aac_decoder() == 0) {
-      die("Shairport Sync can not run on this system. Run \"shairport-sync -h\" for more "
+      die("shairport-2 can not run on this system. Run \"shairport-2 -h\" for more "
           "information.");
     }
 
@@ -679,7 +679,7 @@ int ReceiverApplication::run(ReceiverSettings settings) {
   config.output = audio_get_output(config.output_name);
   if (!config.output) {
     die("the audio backend selected: \"%s\" is not supported. Either it is invalid, or support has "
-        "not been included in this build of Shairport Sync.",
+        "not been included in this build of shairport-2.",
         config.output_name == NULL ? "<unspecified>" : config.output_name);
   }
   debug(1, "audio backend is \"%s\".", config.output_name);
@@ -710,7 +710,7 @@ int ReceiverApplication::run(ReceiverSettings settings) {
   // audio_backend_latency_offset instead.
 
   if (config.userSuppliedLatency) {
-    inform("The fixed latency setting is deprecated, as Shairport Sync gets the correct "
+    inform("The fixed latency setting is deprecated, as shairport-2 gets the correct "
            "latency automatically from the source.");
     inform("Use the audio_backend_latency_offset_in_seconds setting "
            "instead to compensate for timing issues.");

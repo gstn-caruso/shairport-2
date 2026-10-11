@@ -75,7 +75,7 @@ TEST(ConfigurationLease, RetainsMappedStringsAndParsedTreeAfterSourceRemovalAndS
   EXPECT_EQ(config.allow_session_interruption, 1);
   EXPECT_EQ(config.output_channel_map_size, 2u);
   EXPECT_EQ(config.output_channel_map[2], nullptr);
-  EXPECT_STREQ(config.appName, "shairport-sync");
+  EXPECT_STREQ(config.appName, "shairport-2");
   EXPECT_STREQ(config.model, "ShairportSync");
   EXPECT_STREQ(config.firmware_version, "1.2.3");
   ASSERT_NE(config.cfg, nullptr);

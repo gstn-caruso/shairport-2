@@ -103,7 +103,7 @@ const char *short_format_description(int32_t encoded_format) {
   return (const char *)sfd;
 }
 
-// true if Shairport Sync is supposed to be sending output to the output device, false otherwise
+// true if shairport-2 is supposed to be sending output to the output device, false otherwise
 // static volatile int requested_connection_state_to_output = 1;
 
 
