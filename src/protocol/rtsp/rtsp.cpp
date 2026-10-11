@@ -187,6 +187,7 @@ play_lock_r get_play_lock(rtsp_conn_info *conn, int allow_session_interruption) 
 }
 
 static void buf_add(sized_buffer *buf, uint8_t *in, size_t in_len) {
+  if (in_len == 0) return;
   if (buf->length + in_len > buf->size) {
     buf->size = buf->length + in_len + 2048; // Extra headroom to avoid future memcpy's
     buf->data = static_cast<uint8_t *>(realloc(buf->data, buf->size));
@@ -218,7 +219,7 @@ void pair_cipher_bundle::release() {
 
 static size_t buf_remove(sized_buffer *buf, uint8_t *out, size_t out_len) {
   size_t bytes = (buf->length > out_len) ? out_len : buf->length;
-  memcpy(out, buf->data, bytes);
+  if (bytes != 0) memcpy(out, buf->data, bytes);
   buf_drain(buf, bytes);
   return bytes;
 }
