@@ -2,8 +2,7 @@
 
 This describes the delivered source at **v6.1.16** (PR71, source commit
 `1a06ea54942ba9b9592269128f1ae68650d2082b`). The component migration is incomplete.
-See [migration status](receiver-migration-progress.md) for remaining work and
-[validation](../VALIDATION.md) for what the tests establish.
+See [remaining work](#remaining-work) and [validation](#validation) below.
 
 ## Application and session dependencies
 
@@ -141,4 +140,58 @@ Normal RTSP cleanup follows the same dependency order.
 Playback, RTSP conversations, other RTP workers, output/discovery lifetime,
 subprocess ownership and whole-process cooperative shutdown remain incomplete.
 For operational commands use [BUILD.md](../BUILD.md),
-[CONFIGURATION.md](../CONFIGURATION.md) and [TROUBLESHOOTING.md](../TROUBLESHOOTING.md).
+[CONFIGURATION.md](../CONFIGURATION.md).
+
+## Protocol boundaries
+
+The single AirPlay 2 RTSP handler supports setup, record, teardown, pairing and
+Home endpoints, rate/anchor updates, buffered/realtime flush and parameter
+handling. ANNOUNCE and unsupported methods return 501. NTP setup returns 400;
+streaming uses PTP through the bundled companion.
+
+Realtime UDP ALAC uses 352-frame packets at 44.1 kHz / 16-bit stereo. Buffered
+TCP audio supports ALAC at 48 kHz / 24-bit stereo and AAC stereo, 5.1 and 7.1.
+PulseAudio negotiates the destination format and channel layout. Avahi publishes
+`_airplay._tcp` and complementary `_raop._tcp` records; this does not enable
+AirPlay 1. Missing, inaccessible, truncated, uninitialized or incompatible
+companion shared memory prevents listening and discovery at startup.
+
+## Remaining work
+
+- Serialize repeated pairing setup/channel preparation against active event IO.
+- Complete cooperative stopping for RTSP conversations, playback, remaining
+  RTP/buffered workers and whole-process signal shutdown.
+- Encapsulate remaining public SessionState data and runtime global configuration
+  reads beyond explicit timing/directory/pairing inputs.
+- Continue RTSP/player, output/discovery, shared-memory and subprocess adapter
+  decomposition; owned startup settings do not complete infrastructure isolation.
+- Migrate bundled pairing C and remaining transitional C boundaries. Pairing
+  authorization and persistence have not been redesigned.
+- Establish real-device playback, Home, re-pairing, multiroom and controlled
+  performance acceptance.
+
+## Validation
+
+CI runs Release, Debug, ASan+UBSan and TSan builds, CTest contracts and staged
+installation checks. The suite covers CLI/configuration, session/principal
+ownership, RTSP framing and parameters, encrypted buffered/realtime/control
+reception, event transport, pairing transcripts, audio conversion/output, timing
+and companion socket/shared-memory integration. Independent component targets
+also check dependency isolation. Use [BUILD.md](../BUILD.md#build-checks) for
+reproducible commands and `ctest --test-dir build/cmake -N` for the current list.
+
+Some legacy pthread-cancellation fixtures use a condition-wait seam under TSan
+because LLVM 23.1.3 cannot reliably observe their blocking-call unwind. See
+`tests/cancellation_wait.hpp`; these checks do not establish native blocked-read
+cancellation under TSan. Cooperative event IO/destruction tests use native IO
+without that seam. Sanitizer diagnostics remain failures. The NQPTP preload
+fixture is intentionally uninstrumented; production runtime objects are instrumented.
+
+Automated tests do not establish playback quality, Home or multiroom behavior.
+On a designated test host, record binary/sender versions, topology, sample
+material, output layout and results for realtime/buffered ALAC, AAC stereo/5.1/7.1,
+volume/mute, pause/resume, flush, reconnect, pairing/re-pairing, Home add/remove,
+multiroom and shutdown during IO/queue waits followed by restart. Compare CPU,
+live memory, processing latency, allocations and underruns under equivalent
+conditions. A complete device matrix and controlled performance baseline remain
+outstanding; staged package tests do not install or restart host services.

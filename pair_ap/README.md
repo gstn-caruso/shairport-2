@@ -10,7 +10,7 @@ release; `EncryptedChannel` owns cipher state and buffered byte IO. Management
 callbacks use an explicitly supplied `PairingDirectoryPort` and owned snapshots.
 These independently linked C++ components retain the native channel numbers,
 framing and algorithms. See [architecture](../docs/architecture.md#pairing-and-encrypted-io)
-and [validation](../VALIDATION.md) for current contracts and limits.
+and [validation](../docs/architecture.md#validation) for current contracts and limits.
 
 Bundled C migration, authorization/persistence redesign and complete live
 re-pairing acceptance remain open. Do not interpret the native context API's
