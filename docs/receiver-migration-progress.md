@@ -804,6 +804,71 @@ still required. Event listener/thread ownership, complete cooperative shutdown,
 runtime info/global settings, device acceptance, performance measurement, and
 whole-goal completion remain open. No installation or live restart was performed.
 
+The event lifecycle slice gives `EventPortWorker` ownership of the bound TCP
+listener, wake descriptor, accepted-channel interruption handle, and worker.
+Its independently linked ordinary-header component depends on the event
+exchange, the standard library, Threads, and Linux socket/poll/eventfd APIs;
+it does not include SessionState, runtime configuration, plist, or cipher APIs.
+The channel factory and initial-command callback are explicit borrowed
+dependencies. A Linux resource owner gains no useful boundary from a named
+language module here; existing protocol/policy modules retain their boundaries.
+Long Method (#82) assigns this lifecycle to its owner rather than RTSP SETUP.
+
+Both PTP and remote-control SETUP branches transfer a locally bound listener to
+the same start adapter. Start consumes its descriptor on every outcome, checks
+listen/nonblocking setup, and reports errors before advertising the port.
+SessionState no longer carries `event_socket`, `rtp_event_thread`, or the unread
+`ap2_event_receiver_exited` flag. The old event pthread cancellation loop is
+removed. Previously conversation teardown closed the accepted exchange but
+never closed the listening event socket; the worker now closes both after join.
+
+Stop requests wake blocked accept or idle poll through eventfd. A native channel
+owns its accepted fd, while its interruption handle owns a CLOEXEC duplicate
+used only for `shutdown(SHUT_RDWR)`. This wakes encrypted read/write without
+waiting for the exchange mutex or closing a descriptor that could be reused.
+A stop racing channel registration interrupts the newly registered channel
+before initial work. One designated joiner handles concurrent stops without
+holding the lifecycle mutex while joining. Join precedes exchange close,
+listener/wake/interruption release, runtime group/DACP cleanup, and event cipher
+release. Callback/factory dependencies must outlive stop and must complete;
+arbitrary blocking callbacks are not made interruptible by this component.
+
+The Release baseline passed 645/645 in 18.32 seconds. Missing-interface and
+ENOSYS red evidence precedes startup/accept behavior. Tests cover failure
+ownership, stop before accept, one initial command, blocked plaintext reads and
+writes, a synchronized factory-registration race, concurrent/repeated stops,
+duplicate-start rejection, wake-descriptor exhaustion, accepted fd zero, and
+descriptor reuse after channel close. Real RTSP dispatch tests verify both
+successful SETUP port responses and that stop makes the advertised port
+available again. The PTP fixture substitutes NQPTP/discovery effects at their
+native boundaries; it does not establish live NQPTP or Avahi integration.
+
+Actual native HomeKit transactions retain the existing encrypted transcript
+checks and verify two replies before a third blocked response. Separate native
+tests observe blocked encrypted read and write calls, then stop and join before
+cipher release. These cooperative paths pass Release, ASan+UBSan, and TSan
+without CancellationWait or pthread cancellation. The earlier legacy
+exchange-cancellation characterization remains seam-based under TSan; this
+slice does not resolve that separate unwind observation.
+
+Cooperative EOF exposed an existing null-pointer zero-byte memcpy in cipher
+buffer append/remove. The native read tests failed under UBSan before the
+separate fix; zero-byte operations now avoid memcpy while preserving EOF/count
+behavior. The red report is `/tmp/event-worker-eof-asan-red.log` and all five
+native channel/worker cases passed afterward in all three profiles.
+
+Final Release passed 657/657 in 28.37 seconds while other builds ran, which is
+feedback evidence rather than a controlled performance measurement. Focused
+ASan+UBSan passed 68/68 in 4.15 seconds and TSan 68/68 in 4.58 seconds. Independent
+link and production instrumentation evidence is retained under
+`/tmp/event-worker-*`; the production source guard covers the new target.
+Independent review and hosted CI remain pending for this slice. Listener leak,
+listen-failure handling, and cipher EOF fixes require patch classification;
+release automation is expected to produce v6.1.13 without a manual version bump.
+Other protocol/playback workers, whole-process cooperative shutdown, pairing
+decomposition, device/performance acceptance, and whole-goal completion remain
+open. No installation or live restart was performed.
+
 Each delivered PR received independent review and passed all four AMD64 CI
 configurations before merge. The Stage 1 work includes a non-silent stereo ALAC
 fixture comparing every decoded sample; a temporary left/right decoder-plane
