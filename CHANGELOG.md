@@ -1,3 +1,14 @@
+## [6.1.17](https://github.com/gstn-caruso/shairport-2/compare/v6.1.16...v6.1.17) (2026-10-11)
+
+### Bug Fixes
+
+* **nqptp:** reuse live timing peer across playback setup ([#74](https://github.com/gstn-caruso/shairport-2/issues/74)) ([51403c2](https://github.com/gstn-caruso/shairport-2/commit/51403c20651fb9e2d10217dc8c97c08320b389a4))
+
+### Documentation
+
+* refresh current guides and install complete documentation bundle ([#72](https://github.com/gstn-caruso/shairport-2/issues/72)) ([590f09e](https://github.com/gstn-caruso/shairport-2/commit/590f09ef835c915912e8e2bb911ef99b0c74e616))
+* simplify project guides and remove historical fork records ([#73](https://github.com/gstn-caruso/shairport-2/issues/73)) ([81274dc](https://github.com/gstn-caruso/shairport-2/commit/81274dc23c1332442ff23478efe9d989845719cd))
+
 ## [6.1.16](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.15...v6.1.16) (2026-10-11)
 
 ### Bug Fixes
