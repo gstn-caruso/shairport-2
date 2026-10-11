@@ -55,6 +55,7 @@
 #include "platform/utilities/ffmpeg_api.h"
 #include <span>
 #include <functional>
+#include <limits>
 import receiver.protocol.ap2.realtime_audio;
 import receiver.protocol.ap2.control_packet;
 
@@ -412,6 +413,12 @@ void decipher_player_put_packet(uint8_t *packet, ssize_t count, rtsp_conn_info *
   else submitRealtimeAudio(*audio,*conn);
 }
 
+static double controlStreamSeconds(int32_t stream,unsigned rate) {
+  const auto frames = static_cast<int64_t>(stream)+11025;
+  if (rate != 0) return frames*1.0/rate;
+  if (frames == 0) return std::numeric_limits<double>::quiet_NaN();
+  return frames < 0 ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
+}
 void *rtp_ap2_control_receiver(void *arg) {
   pthread_cleanup_push(rtp_ap2_control_handler_cleanup_handler,arg);
   auto *conn = static_cast<rtsp_conn_info *>(arg);
@@ -458,7 +465,7 @@ void *rtp_ap2_control_receiver(void *arg) {
       case ControlEffectKind::warnAndZeroSharedOffset:
         warn("The stream latency (%g seconds) is too short to accommodate an audio backend latency offset of "
              "%g seconds and a backend buffer of %g seconds. The audio_backend_latency_offset has been set to zero.",
-             (static_cast<int64_t>(effect.stream)+11025)*1.0/live.inputRate,
+             controlStreamSeconds(effect.stream,live.inputRate),
              live.sharedOffsetSeconds,live.backendBufferSeconds);
         config.audio_backend_latency_offset = 0;
         conn->latency_warning_issued = 1;

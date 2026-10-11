@@ -37,12 +37,12 @@ static std::vector<uint8_t> controlTiming(uint32_t first,uint32_t second) {
   bigEndian(16,second,4); bigEndian(20,0x1122334455667788,8);
   return packet;
 }
-static void runControlPackets(bool includeInvalid) {
+static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool negativeZero = false) {
   anchors.clear(); RestoreControlSettings restore;
   config.audio_backend_buffer_desired_length = 0.1;
   config.audio_backend_latency_offset = -10;
   config.diagnostic_drop_packet_fraction = 0;
-  SessionState session{}; session.inputAudio.setSetupSampleRate(44100);
+  SessionState session{}; session.inputAudio.setSetupSampleRate(rate);
   activeSession = &session;
   session.airplay_stream_type = realtime_stream;
   const int descriptor = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
@@ -62,7 +62,7 @@ static void runControlPackets(bool includeInvalid) {
       const auto malformed = controlTiming(0,0x7fffffff);
       EXPECT_EQ(send(client,malformed.data(),malformed.size(),MSG_NOSIGNAL),28);
     }
-    const auto packet = controlTiming(first,first+77175);
+    const auto packet = controlTiming(first,negativeZero ? first-11026 : first+77175);
     EXPECT_EQ(send(client,packet.data(),packet.size(),MSG_NOSIGNAL),28);
   }
   bool arrived;
@@ -74,8 +74,14 @@ static void runControlPackets(bool includeInvalid) {
   EXPECT_EQ(anchors[0].clock,0x1122334455667788u);
   EXPECT_EQ(anchors[0].time,0x0102030405060708u);
   EXPECT_EQ(anchors[0].frame,88975u); EXPECT_EQ(anchors[1].frame,188975u);
-  for (const auto &anchor : anchors) { EXPECT_EQ(anchor.latency,83790u); EXPECT_EQ(anchor.offset,0); EXPECT_EQ(anchor.warned,1); }
+  for (const auto &anchor : anchors) {
+    EXPECT_EQ(anchor.latency,negativeZero ? UINT32_MAX : rate == 0 ? 88200u : 83790u);
+    EXPECT_EQ(anchor.offset,negativeZero ? 0 : rate == 0 ? -10 : 0);
+    EXPECT_EQ(anchor.warned,negativeZero || rate != 0 ? 1 : 0);
+  }
   EXPECT_EQ(session.ap2_control_socket,-1);
 }
 TEST(ControlPacketLegacy, SentinelD7PublishesBigEndianAnchorAndZeroesSharedOffsetOnce) { runControlPackets(false); }
 TEST(ControlPacketRuntime, InvalidTimingDoesNotPublishAnchorOrLatencyBeforeNextValidPacket) { runControlPackets(true); }
+TEST(ControlPacketRuntime, EarlyAnchorBeforeInputRateSetupStillPublishes) { runControlPackets(false,0); }
+TEST(ControlPacketRuntime, ZeroRateNegativeLatencyKeepsWarnOnceEffectsWithNonfiniteDiagnosticSeconds) { runControlPackets(false,0,true); }

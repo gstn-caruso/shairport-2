@@ -104,7 +104,7 @@ std::expected<ControlLatencyResult,ControlLatencyError> ControlLatency::calculat
   const auto stream = std::bit_cast<std::int32_t>(frame2-frame1);
   const auto buffer = truncatedFrames(backendBufferSeconds,inputRate);
   const auto offset = truncatedFrames(sharedOffsetSeconds,inputRate);
-  if (inputRate == 0 || !buffer || !offset) return std::unexpected(ControlLatencyError::invalidLatency);
+  if (!buffer || !offset) return std::unexpected(ControlLatencyError::invalidLatency);
   const auto source = std::int64_t{stream} + 11025 - *buffer;
   auto total = source + *offset;
   if (!fitsLatency(source) || !fitsLatency(total)) return std::unexpected(ControlLatencyError::invalidLatency);

@@ -20,14 +20,19 @@ TEST(ControlLatency, OverflowingTimestampLatencyReturnsTypedFailure) {
   auto overflow = ControlLatency::calculate(0,0x7fffffff,44100,0,0,false);
   EXPECT_FALSE(overflow);
 }
-TEST(ControlLatency, NonfiniteOutOfRangeConversionsAndZeroRateRejectExplicitly) {
+TEST(ControlLatency, NonfiniteAndOutOfRangeConversionsRejectExplicitly) {
   for (double seconds : {std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity(),
                          std::numeric_limits<double>::quiet_NaN(),1E100,-1E100}) {
     EXPECT_FALSE(ControlLatency::calculate(100000,177175,44100,seconds,0,false));
     EXPECT_FALSE(ControlLatency::calculate(100000,177175,44100,0,seconds,false));
   }
-  EXPECT_FALSE(ControlLatency::calculate(100000,177175,0,0,0,false));
   EXPECT_FALSE(ControlLatency::calculate(100000,177175,1,0,2147483647.9,false));
+}
+TEST(ControlLatency, EarlyAnchorBeforeSampleRateSetupPreservesFiniteZeroRateCalculation) {
+  auto early = ControlLatency::calculate(100000,177175,0,0.1,-10,false);
+  ASSERT_TRUE(early); EXPECT_EQ(early->total,88200); EXPECT_FALSE(early->warnAndZero);
+  auto negative = ControlLatency::calculate(0,0xffffd4ee,0,0.1,-10,false);
+  ASSERT_TRUE(negative); EXPECT_EQ(negative->total,-1); EXPECT_TRUE(negative->warnAndZero);
 }
 TEST(ControlLatency, WrappedFrameDifferenceAndFractionalIntBoundaryPreserveDefinedBehavior) {
   auto wrapped = ControlLatency::calculate(0xfffffff0,77159,44100,0,0,false);
