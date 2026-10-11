@@ -1,3 +1,9 @@
+## [6.1.12](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.11...v6.1.12) (2026-10-11)
+
+### Bug Fixes
+
+* **ap2:** bound event replies in an owned command exchange ([#67](https://github.com/gstn-caruso/shairport-sync/issues/67)) ([dd70bdb](https://github.com/gstn-caruso/shairport-sync/commit/dd70bdb72f7029962b9deffd745ad94af9c7c91b))
+
 ## [6.1.11](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.10...v6.1.11) (2026-10-11)
 
 ### Bug Fixes
