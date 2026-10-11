@@ -35,6 +35,17 @@ static bool isolatedChild = false;
 static std::atomic<bool> captureTiming{false};
 static std::promise<std::shared_ptr<SharedRtpTimingSettings>> acceptedTiming;
 static sockaddr_in boundAddress{};
+static std::atomic<bool> observeConversationFinish{false};
+static std::promise<void> conversationFinished;
+
+extern "C" void realSessionFinished(void *,int)
+    asm("__real__ZN15SessionRegistry12markFinishedEi");
+extern "C" void wrappedSessionFinished(void *,int)
+    asm("__wrap__ZN15SessionRegistry12markFinishedEi");
+extern "C" void wrappedSessionFinished(void *registry,int id) {
+  realSessionFinished(registry,id);
+  if (observeConversationFinish.exchange(false)) conversationFinished.set_value();
+}
 
 std::unique_ptr<SessionState> realSessionCreate(std::shared_ptr<SharedRtpTimingSettings>)
     asm("__real__ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsE");
@@ -317,6 +328,8 @@ TEST(RtspListener, AcceptedSessionReceivesExactOwnerAndRetainsItAfterListenerSto
   auto timing = std::make_shared<SharedRtpTimingSettings>(-0.125);
   auto *identity = timing.get();
   auto accepted = acceptedTiming.get_future();
+  auto finished = conversationFinished.get_future();
+  observeConversationFinish = true;
   ASSERT_EQ(rtsp_listener_start(timing),0);
   ASSERT_TRUE(waiting.try_acquire_for(500ms));
   const int client = socket(AF_INET,SOCK_STREAM | SOCK_CLOEXEC,0);
@@ -328,8 +341,9 @@ TEST(RtspListener, AcceptedSessionReceivesExactOwnerAndRetainsItAfterListenerSto
   EXPECT_EQ(passed.get(),identity);
   auto retained = SessionState::create(passed);
   timing.reset(); passed.reset();
-  rtsp_listener_stop();
   close(client);
+  ASSERT_EQ(finished.wait_for(500ms),std::future_status::ready);
+  rtsp_listener_stop();
   EXPECT_EQ(&retained->timingSettings(),identity);
   EXPECT_DOUBLE_EQ(retained->timingSettings().offsetSeconds(),-0.125);
   retained->timingSettings().disableForInsufficientLatency();

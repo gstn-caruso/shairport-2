@@ -94,7 +94,7 @@ if(CONFIG_USE_GIT_VERSION_STRING)
   add_dependencies(receiver git-version)
 endif()
 target_link_libraries(shairport-sync PRIVATE receiver)
-foreach(target receiver receiver-text receiver-configuration receiver-packets receiver-volume-policy receiver-rtp-clock receiver-audio-format receiver-audio-decoder receiver-audio-resampler receiver-rtsp-message receiver-rtsp-parameters receiver-rtsp-request receiver-pcm receiver-playback-timing receiver-output-queue receiver-output-setup receiver-session-registry receiver-principal-selection receiver-mod23 receiver-buffered-flush receiver-buffered-block receiver-buffered-playback receiver-buffered-coordinator receiver-realtime-audio receiver-control-packet receiver-byte-queue receiver-buffered-tcp shairport-sync nqptp-core shairport-sync-nqptp)
+foreach(target receiver receiver-text receiver-configuration receiver-packets receiver-volume-policy receiver-rtp-clock receiver-rtp-timing-settings receiver-audio-format receiver-audio-decoder receiver-audio-resampler receiver-rtsp-message receiver-rtsp-parameters receiver-rtsp-request receiver-pcm receiver-playback-timing receiver-output-queue receiver-output-setup receiver-session-registry receiver-principal-selection receiver-mod23 receiver-buffered-flush receiver-buffered-block receiver-buffered-playback receiver-buffered-coordinator receiver-realtime-audio receiver-control-packet receiver-byte-queue receiver-buffered-tcp shairport-sync nqptp-core shairport-sync-nqptp)
   get_target_property(production_sources ${target} SOURCES)
   foreach(source IN LISTS production_sources)
     get_source_file_property(source_language "${source}" TARGET_DIRECTORY ${target} LANGUAGE)
@@ -230,7 +230,8 @@ if(BUILD_TESTING)
   target_link_libraries(rtsp-listener-test PRIVATE receiver GTest::gtest)
   target_link_options(rtsp-listener-test PRIVATE -Wl,--wrap=poll -Wl,--wrap=accept4
     -Wl,--wrap=build_bonjour_strings -Wl,--wrap=mdns_register -Wl,--wrap=bind
-    -Wl,--wrap=exit_request -Wl,--wrap=_ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsE)
+    -Wl,--wrap=exit_request -Wl,--wrap=_ZN12SessionState6createESt10shared_ptrI23SharedRtpTimingSettingsE
+    -Wl,--wrap=_ZN15SessionRegistry12markFinishedEi)
   gtest_discover_tests(rtsp-listener-test PROPERTIES TIMEOUT 5)
   add_executable(nqptp-integration-test tests/nqptp_integration_test.cpp)
   target_link_libraries(nqptp-integration-test PRIVATE nqptp-core receiver GTest::gtest_main)
