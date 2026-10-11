@@ -11,13 +11,11 @@ set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
 set(CPACK_PACKAGE_CHECKSUM SHA256)
 
 install(FILES COPYING DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/shairport-sync" RENAME copyright)
-install(FILES README.md BUILD.md CONFIGURATION.md AIRPLAY2.md ADDINGTOHOME.md
-  TROUBLESHOOTING.md VALIDATION.md RELEASENOTES.md CHANGELOG.md
+install(FILES README.md BUILD.md CONFIGURATION.md CHANGELOG.md
   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/shairport-sync")
-install(DIRECTORY docs/ DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/shairport-sync/docs"
-  FILES_MATCHING PATTERN "*.md")
+install(FILES docs/architecture.md DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/shairport-sync/docs")
 install(FILES pair_ap/README.md DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/shairport-sync/pair_ap")
-install(FILES companion/nqptp/PROVENANCE.md companion/nqptp/VERIFICATION.md
+install(FILES companion/nqptp/PROVENANCE.md
   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/shairport-sync/companion/nqptp")
 install(FILES LICENSES DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/shairport-sync")
 install(FILES companion/nqptp/LICENSE companion/nqptp/COPYING companion/nqptp/PROVENANCE.md

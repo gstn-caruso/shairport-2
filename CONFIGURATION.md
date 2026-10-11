@@ -1,4 +1,10 @@
-# Build configuration
+# Configuration and troubleshooting
+
+Version 6.0.0 replaced the legacy CLI with the foreground interface below.
+Version 6.1.0 bundled the timing companion. Stop an older standalone timing
+service before activating it and restart the receiver after a companion restart;
+see [timing migration](BUILD.md#migrating-a-separately-installed-nqptp).
+Both applications share one version; [CHANGELOG.md](CHANGELOG.md) records releases.
 
 ## Foreground operation
 
@@ -37,15 +43,6 @@ Use `--config PATH` instead of `-c` or `--configfile`; `--version` replaces `-V`
 Daemon/PID/control, backend-selection and syslog flags are unsupported. Use
 `journalctl --user -u shairport-sync` for diagnostics.
 
-`ConfigurationLoader` returns owned settings using explicit environment inputs.
-`ReceiverApplication` retains the process-lifetime compatibility lease for
-runtime consumers that still read global configuration. Shared timing settings,
-the pairing directory and immutable device-ID/PIN options are already passed
-explicitly through the listener to sessions. These boundaries do not imply
-complete resource/session encapsulation; see [migration status](docs/receiver-migration-progress.md).
-The popt library remains solely for existing subprocess-hook argument splitting;
-operational arguments use `StartupOptions`.
-
 ## Build stack
 
 The CMake build is AirPlay 2 on Linux using PulseAudio, Avahi, OpenSSL and FFmpeg. These dependencies cannot be disabled. Other platforms fail explicitly.
@@ -55,3 +52,33 @@ Use `-DCMAKE_INSTALL_PREFIX=/usr/local` and `-DCMAKE_INSTALL_SYSCONFDIR=/etc` to
 Legacy `WITH_`, `WITHOUT_` and `CONFIG_` CMake cache switches fail explicitly: audio/discovery alternatives, alternate ALAC decoders, daemon/PID support, DSP/SoX interpolation, metadata export, DBus, MPRIS, MQTT and system/init installers. The sample configuration documents the current runtime settings.
 
 Runtime backend selection (`--output`, `--mdns`, `general.output_backend`, `general.mdns_backend`) and service selection (`--service-type`, `general.service_type`) are removed. Use `pulseaudio.server` and `pulseaudio.sink` to select the audio destination. Interpolation accepts `auto`, `basic` or `vernier`; `soxr` fails.
+
+## Troubleshooting
+
+Check `shairport-sync --version` and validate the effective configuration with
+`shairport-sync --check-config --config /etc/shairport-sync.conf`. Both commands
+work without audio, discovery or timing services. Inspect receiver logs with
+`journalctl --user -u shairport-sync`; increase `diagnostics.log_verbosity` and
+optionally enable `diagnostics.statistics` for playback problems.
+
+| Symptom | Checks |
+| --- | --- |
+| Startup fails before discovery | Check `sudo systemctl status shairport-sync-nqptp`, its journal, readable shared memory and matching SMI10. Follow the timing migration guide for port conflicts or stale shared memory. |
+| Receiver is absent from the picker | Check Avahi, Bonjour multicast filtering and network isolation. The RTSP port defaults to TCP 7000; negotiated session UDP ports start at 6001 by default. |
+| Connected but silent | Run `pactl info` and `pactl list short sinks` in the audio user's session; check server, sink, volume and `pipewire-pulse` availability. |
+| Configuration rejected | Compare with `scripts/shairport-sync.conf`. Removed options and even empty legacy backend groups are errors. |
+| Dropouts or timing problems | Enable diagnostics and inspect packet loss, clock availability and output latency. |
+
+### Home and pairing
+
+Keep the receiver name and device identifier stable. `general.airplay_device_id`
+or its offset can distinguish multiple receivers. Sender and receiver need a
+network that permits Bonjour discovery. In Home, choose Add Accessory → More
+Options, select the receiver and follow the pairing flow.
+
+The management directory is in-memory, not persistent pairing storage. Validate
+pairing, restart/reconnect and removal/re-addition with actual devices. Repeated
+setup versus active event IO has an inherited cipher synchronization gap; local
+protocol tests do not establish live re-pairing safety. Record receiver/sender
+versions, stream format and logs when reporting problems. See the architecture
+guide for [validation limits](docs/architecture.md#validation).
