@@ -15,3 +15,7 @@ add_library(receiver-control-datagram-channel STATIC control_datagram_channel.cp
 target_include_directories(receiver-control-datagram-channel PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(receiver-control-datagram-channel PUBLIC receiver-remote-control-peer Threads::Threads)
 target_link_libraries(receiver PUBLIC receiver-control-datagram-channel)
+add_library(receiver-event-port-worker STATIC event_port_worker.cpp)
+target_include_directories(receiver-event-port-worker PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(receiver-event-port-worker PUBLIC receiver-event-command Threads::Threads)
+target_link_libraries(receiver PUBLIC receiver-event-port-worker)

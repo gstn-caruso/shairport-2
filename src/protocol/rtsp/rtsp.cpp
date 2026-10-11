@@ -187,6 +187,7 @@ play_lock_r get_play_lock(rtsp_conn_info *conn, int allow_session_interruption) 
 }
 
 static void buf_add(sized_buffer *buf, uint8_t *in, size_t in_len) {
+  if (in_len == 0) return;
   if (buf->length + in_len > buf->size) {
     buf->size = buf->length + in_len + 2048; // Extra headroom to avoid future memcpy's
     buf->data = static_cast<uint8_t *>(realloc(buf->data, buf->size));
@@ -218,7 +219,7 @@ void pair_cipher_bundle::release() {
 
 static size_t buf_remove(sized_buffer *buf, uint8_t *out, size_t out_len) {
   size_t bytes = (buf->length > out_len) ? out_len : buf->length;
-  memcpy(out, buf->data, bytes);
+  if (bytes != 0) memcpy(out, buf->data, bytes);
   buf_drain(buf, bytes);
   return bytes;
 }
@@ -1998,9 +1999,10 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
               // get a port to use as an event port
               // bind a new TCP port and get a socket
               conn->local_event_port = 0; // any port
+              int eventListener = -1;
               int lerr = bind_socket_and_port(SOCK_STREAM, conn->connection_ip_family,
                                               conn->self_ip_string, conn->self_scope_id,
-                                              &conn->local_event_port, &conn->event_socket);
+                                              &conn->local_event_port, &eventListener);
               if (lerr) {
                 die("SETUP on Connection %d: Error %d: could not find a TCP port to use as an "
                     "event "
@@ -2008,20 +2010,14 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
                     conn->connection_number, lerr);
               }
 
-              listen(conn->event_socket, 128); // ensure socket is open before telling client
+              const auto eventStarted = start_ap2_event_worker(conn,eventListener);
+              if (!eventStarted)
+                die("SETUP on Connection %d: could not start event listener: %d",
+                    conn->connection_number,eventStarted.error());
 
               debug(2, "Connection %d: TCP PTP event port opened: %u.", conn->connection_number,
                     conn->local_event_port);
 
-              if (conn->rtp_event_thread != NULL)
-                debug(1, "previous rtp_event_thread allocation not freed, it seems.");
-              conn->ap2_event_receiver_exited = 0;
-              conn->rtp_event_thread = static_cast<pthread_t *>(malloc(sizeof(pthread_t)));
-              if (conn->rtp_event_thread == NULL)
-                die("Couldn't allocate space for pthread_t");
-
-              named_pthread_create(conn->rtp_event_thread, NULL, &ap2_event_receiver, (void *)conn,
-                                   "ap2_ptp_evt_%d", conn->connection_number);
               plist_dict_set_item(setupResponsePlist, "eventPort",
                                   plist_new_uint(conn->local_event_port));
               plist_dict_set_item(setupResponsePlist, "timingPort", plist_new_uint(0)); // dummy
@@ -2053,30 +2049,23 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
           // get a port to use as an event port
           // bind a new TCP port and get a socket
           conn->local_event_port = 0; // any port
+          int eventListener = -1;
           int lerr = bind_socket_and_port(SOCK_STREAM, conn->connection_ip_family,
                                           conn->self_ip_string, conn->self_scope_id,
-                                          &conn->local_event_port, &conn->event_socket);
+                                          &conn->local_event_port, &eventListener);
           if (lerr) {
             die("SETUP on Connection %d: Error %d: could not find a TCP port to use as an event "
                 "port",
                 conn->connection_number, lerr);
           }
 
-          listen(conn->event_socket, 128); // ensure socket is open before telling client
+          const auto eventStarted = start_ap2_event_worker(conn,eventListener);
+          if (!eventStarted)
+            die("SETUP on Connection %d: could not start event listener: %d",
+                conn->connection_number,eventStarted.error());
 
           debug(2, "Connection %d SETUP (RC): TCP Remote Control event port opened: %u.",
                 conn->connection_number, conn->local_event_port);
-          if (conn->rtp_event_thread != NULL)
-            debug(1,
-                  "Connection %d SETUP (RC): previous rtp_event_thread allocation not freed, it "
-                  "seems.",
-                  conn->connection_number);
-          conn->ap2_event_receiver_exited = 0;
-          conn->rtp_event_thread = static_cast<pthread_t *>(malloc(sizeof(pthread_t)));
-          if (conn->rtp_event_thread == NULL)
-            die("Couldn't allocate space for pthread_t");
-          named_pthread_create(conn->rtp_event_thread, NULL, &ap2_event_receiver, (void *)conn,
-                               "ap2_rc_evt_%d", conn->connection_number);
           plist_dict_set_item(setupResponsePlist, "eventPort",
                               plist_new_uint(conn->local_event_port));
           debug(2, "SETUP on Connection %d: RemoteControl Only eventPort %u.",
@@ -2547,14 +2536,7 @@ void rtsp_conversation_thread_cleanup_function(void *arg) {
       conn->session_key = NULL;
     }
 
-    // give the event receiver a chance to exit normally, if it exists
-    if (conn->rtp_event_thread != NULL) {
-      pthread_cancel(*conn->rtp_event_thread);
-      pthread_join(*conn->rtp_event_thread, NULL);
-      free(conn->rtp_event_thread);
-      conn->rtp_event_thread = NULL;
-    }
-    conn->ap2_event_receiver_exited = 0;
+    stop_ap2_event_worker(conn);
     debug(3, "Connection %d: %s event thread deleted.", conn->connection_number,
           get_category_string(conn->airplay_stream_category));
 
