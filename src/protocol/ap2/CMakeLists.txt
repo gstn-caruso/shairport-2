@@ -33,3 +33,7 @@ target_sources(receiver-pairing-directory PUBLIC FILE_SET CXX_MODULES FILES pair
 set_target_properties(receiver-pairing-directory PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_include_directories(receiver-pairing-directory PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(receiver-pairing-directory PUBLIC Threads::Threads)
+add_library(receiver-pairing-management STATIC pairing_management.cpp)
+target_include_directories(receiver-pairing-management PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(receiver-pairing-management PUBLIC pair_ap)
+target_link_libraries(receiver PUBLIC receiver-pairing-management)
