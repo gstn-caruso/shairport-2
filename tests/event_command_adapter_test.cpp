@@ -109,6 +109,25 @@ TEST(NativeEventChannel, CloseOwnsAcceptedFdWithoutAccessingReleasedCipher) {
   EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1); close(sockets[1]);
 }
 
+TEST(NativeEventChannel, InterruptPinsSocketAndWakesReadWithoutClosingChannel) {
+  int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
+  pair_cipher_bundle cipher{};
+  auto accepted = makeInterruptibleNativeEventChannel(sockets[0],cipher);
+  ASSERT_TRUE(accepted);
+  auto reading = std::async(std::launch::async,[&]{
+    std::array<uint8_t,4096> reply; return accepted->channel->read(reply);
+  });
+  EXPECT_EQ(reading.wait_for(std::chrono::milliseconds(30)),std::future_status::timeout);
+  accepted->interrupt->interrupt();
+  ASSERT_EQ(reading.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  EXPECT_EQ(reading.get(),0); EXPECT_NE(fcntl(sockets[0],F_GETFD),-1);
+  accepted->channel.reset(); EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1);
+  const int reused = open("/dev/null",O_RDONLY);
+  ASSERT_EQ(reused,sockets[0]); accepted->interrupt->interrupt();
+  EXPECT_NE(fcntl(reused,F_GETFD),-1);
+  close(reused); close(sockets[1]);
+}
+
 TEST(NativeEventChannel, RejectedAttachmentClosesOnlyCandidateDescriptor) {
   int first[2],second[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,first),0);
   ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,second),0);
