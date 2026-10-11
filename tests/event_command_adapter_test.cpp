@@ -1,6 +1,7 @@
 #include "session/session_state.hpp"
 #include "protocol/rtsp/rtsp.h"
 #include "protocol/ap2/native_event_channel.hpp"
+#include "protocol/ap2/native_encrypted_channel.hpp"
 #include "platform/utilities/debug.h"
 #include <gtest/gtest.h>
 #include <array>
@@ -25,6 +26,21 @@ static std::atomic<int> observedWriteFd{-1};
 static std::promise<void> nativeWriting;
 static std::atomic<int> cooperativeReadFd{-1};
 static std::promise<void> cooperativeReading;
+static std::atomic<int> destructionReadFd{-1};
+static std::promise<void> destructionReading;
+static std::atomic<bool> observeDestructionCipherRelease{false};
+static std::atomic<bool> destructionCallbackCompleted{false};
+static std::atomic<int> destructionAcceptedFd{-1};
+static int destructionCipherReleaseCount = 0;
+extern "C" void __real_pair_cipher_free(pair_cipher_context *);
+extern "C" void __wrap_pair_cipher_free(pair_cipher_context *cipher) {
+  if (cipher && observeDestructionCipherRelease.load()) {
+    EXPECT_TRUE(destructionCallbackCompleted.load());
+    EXPECT_EQ(fcntl(destructionAcceptedFd.load(),F_GETFD),-1);
+    ++destructionCipherReleaseCount;
+  }
+  __real_pair_cipher_free(cipher);
+}
 extern "C" ssize_t __real_write(int,const void *,size_t);
 extern "C" ssize_t __wrap_write(int fd,const void *bytes,size_t count) {
   int expected = fd;
@@ -35,6 +51,8 @@ extern "C" ssize_t __real_read(int,void *,size_t);
 extern "C" ssize_t __wrap_read(int fd,void *bytes,size_t count) {
   int expected = fd;
   if (cooperativeReadFd.compare_exchange_strong(expected,-1)) cooperativeReading.set_value();
+  expected = fd;
+  if (destructionReadFd.compare_exchange_strong(expected,-1)) destructionReading.set_value();
   if (fd == observedReadFd && observeNativeRead.exchange(false)) {
     nativeReading.set_value();
 #if __has_feature(thread_sanitizer)
@@ -113,7 +131,7 @@ TEST(EventCommandRuntime, ActualReplyDiagnosticBoundsFullCapacityAndStopsAtFirst
 
 TEST(NativeEventChannel, CloseOwnsAcceptedFdWithoutAccessingReleasedCipher) {
   int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
-  pair_cipher_bundle cipher{};
+  EncryptedChannel cipher{};
   auto channel = makeNativeEventChannel(sockets[0],cipher);
   EXPECT_NE(fcntl(sockets[0],F_GETFD),-1);
   cipher.release(); channel.reset();
@@ -122,7 +140,7 @@ TEST(NativeEventChannel, CloseOwnsAcceptedFdWithoutAccessingReleasedCipher) {
 
 TEST(NativeEventChannel, InterruptPinsSocketAndWakesReadWithoutClosingChannel) {
   int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
-  pair_cipher_bundle cipher{};
+  EncryptedChannel cipher{};
   auto accepted = makeInterruptibleNativeEventChannel(sockets[0],cipher);
   ASSERT_TRUE(accepted);
   auto reading = std::async(std::launch::async,[&]{
@@ -142,7 +160,7 @@ TEST(NativeEventChannel, InterruptPinsSocketAndWakesReadWithoutClosingChannel) {
 TEST(NativeEventChannel, RejectedAttachmentClosesOnlyCandidateDescriptor) {
   int first[2],second[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,first),0);
   ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,second),0);
-  pair_cipher_bundle cipher{};
+  EncryptedChannel cipher{};
   EventCommandExchange exchange;
   ASSERT_TRUE(exchange.attach(makeNativeEventChannel(first[0],cipher)));
   EXPECT_FALSE(exchange.attach(makeNativeEventChannel(second[0],cipher)));
@@ -155,12 +173,12 @@ TEST(EventCommandRuntime, BinaryPlistPostUsesRealEventCipherAcrossTwoTransaction
   const timeval timeout{1,0};
   for (int fd : sockets) ASSERT_EQ(setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout)),0);
   SessionState session{};
-  pair_cipher_bundle peer{};
+  EncryptedChannel peer{};
   const std::array<uint8_t,32> key{};
   auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
-  cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
-  peer.cipher_ctx = pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL,1,key.data(),key.size(),"");
-  ASSERT_NE(cipher.cipher_ctx,nullptr); ASSERT_NE(peer.cipher_ctx,nullptr);
+  ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
+  ASSERT_TRUE(peer.prepare(PAIR_CLIENT_HOMEKIT_NORMAL,1,key,"","Peer"));
+  ASSERT_TRUE(cipher.prepared()); ASSERT_TRUE(peer.prepared());
   ASSERT_TRUE(session.eventCommandExchange.attach(makeNativeEventChannel(sockets[0],cipher)));
   std::vector<std::vector<uint8_t>> received;
   const std::vector<std::vector<uint8_t>> replies{{'o',0,'k'},{'n','e','x','t'}};
@@ -189,12 +207,12 @@ TEST(EventCommandRuntime, BinaryPlistPostUsesRealEventCipherAcrossTwoTransaction
 
 TEST(EventCommandRuntime, CancellationDuringNativeEncryptedResponseUnlocksAndClosesBeforeCipherRelease) {
   int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
-  SessionState session{}; pair_cipher_bundle peer{};
+  SessionState session{}; EncryptedChannel peer{};
   const std::array<uint8_t,32> key{};
   auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
-  cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
-  peer.cipher_ctx = pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL,1,key.data(),key.size(),"");
-  ASSERT_NE(cipher.cipher_ctx,nullptr); ASSERT_NE(peer.cipher_ctx,nullptr);
+  ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
+  ASSERT_TRUE(peer.prepare(PAIR_CLIENT_HOMEKIT_NORMAL,1,key,"","Peer"));
+  ASSERT_TRUE(cipher.prepared()); ASSERT_TRUE(peer.prepared());
   ASSERT_TRUE(session.eventCommandExchange.attach(makeNativeEventChannel(sockets[0],cipher)));
   auto reading = nativeReading.get_future(); observedReadFd = sockets[0]; observeNativeRead = true;
   pthread_t worker;
@@ -210,7 +228,7 @@ TEST(EventCommandRuntime, CancellationDuringNativeEncryptedResponseUnlocksAndClo
   auto closing = std::async(std::launch::async,[&] { session.eventCommandExchange.close(); });
   ASSERT_EQ(closing.wait_for(std::chrono::milliseconds(500)),std::future_status::ready);
   closing.get(); EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1);
-  EXPECT_NE(cipher.cipher_ctx,nullptr);
+  EXPECT_TRUE(cipher.prepared());
   cipher.release(); peer.release(); close(sockets[1]); observedReadFd = -1;
 }
 
@@ -231,12 +249,12 @@ struct WorkerLoopback {
 };
 
 TEST(EventPortRuntime, NativeEncryptedTransactionsStopDuringReplyBeforeCipherRelease) {
-  WorkerLoopback sockets; SessionState session{}; pair_cipher_bundle peer{};
+  WorkerLoopback sockets; SessionState session{}; EncryptedChannel peer{};
   auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
   const std::array<uint8_t,32> key{};
-  cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
-  peer.cipher_ctx = pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL,1,key.data(),key.size(),"");
-  ASSERT_NE(cipher.cipher_ctx,nullptr); ASSERT_NE(peer.cipher_ctx,nullptr);
+  ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
+  ASSERT_TRUE(peer.prepare(PAIR_CLIENT_HOMEKIT_NORMAL,1,key,"","Peer"));
+  ASSERT_TRUE(cipher.prepared()); ASSERT_TRUE(peer.prepared());
   std::atomic<int> accepted{-1}; std::vector<ssize_t> counts;
   auto reading = cooperativeReading.get_future();
   std::promise<void> completed; auto done = completed.get_future();
@@ -266,7 +284,7 @@ TEST(EventPortRuntime, NativeEncryptedTransactionsStopDuringReplyBeforeCipherRel
   auto stopping = std::async(std::launch::async,[&]{ return session.eventPortWorker.stop(); });
   ASSERT_EQ(stopping.wait_for(std::chrono::seconds(1)),std::future_status::ready);
   EXPECT_EQ(stopping.get(),0); EXPECT_EQ(counts,(std::vector<ssize_t>{3,3,0}));
-  EXPECT_EQ(fcntl(accepted.load(),F_GETFD),-1); EXPECT_NE(cipher.cipher_ctx,nullptr);
+  EXPECT_EQ(fcntl(accepted.load(),F_GETFD),-1); EXPECT_TRUE(cipher.prepared());
   cipher.release(); peer.release();
 }
 
@@ -274,8 +292,8 @@ TEST(EventPortRuntime, NativeEncryptedBlockedWriteStopsWithoutCancellation) {
   WorkerLoopback sockets; SessionState session{};
   auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
   const std::array<uint8_t,32> key{};
-  cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
-  ASSERT_NE(cipher.cipher_ctx,nullptr);
+  ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
+  ASSERT_TRUE(cipher.prepared());
   struct IgnoreBrokenPipe {
     struct sigaction previous{};
     IgnoreBrokenPipe() { struct sigaction ignored{}; ignored.sa_handler = SIG_IGN; sigaction(SIGPIPE,&ignored,&previous); }
@@ -298,5 +316,44 @@ TEST(EventPortRuntime, NativeEncryptedBlockedWriteStopsWithoutCancellation) {
   auto stopping = std::async(std::launch::async,[&]{ return session.eventPortWorker.stop(); });
   ASSERT_EQ(stopping.wait_for(std::chrono::seconds(2)),std::future_status::ready);
   EXPECT_EQ(stopping.get(),0); EXPECT_EQ(result.status,EventStatus::writeFailed);
-  EXPECT_NE(cipher.cipher_ctx,nullptr); cipher.release();
+  EXPECT_TRUE(cipher.prepared()); cipher.release();
+}
+
+TEST(EventPortRuntime, DirectSessionDestructionJoinsNativeExchangeBeforeCipherRelease) {
+  WorkerLoopback sockets;
+  auto session = std::make_unique<SessionState>();
+  auto *active = session.get();
+  auto &cipher = active->ap2_pairing_context.event_cipher_bundle;
+  EncryptedChannel peer;
+  const std::array<uint8_t,32> key{};
+  ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
+  ASSERT_TRUE(peer.prepare(PAIR_CLIENT_HOMEKIT_NORMAL,1,key,"","Peer"));
+  auto reading = destructionReading.get_future();
+  EventResult result{};
+  destructionCallbackCompleted = false;
+  destructionCipherReleaseCount = 0;
+  ASSERT_TRUE(active->eventPortWorker.start(std::exchange(sockets.listener,-1),active->eventCommandExchange,
+      [&](int fd) {
+        destructionAcceptedFd = fd;
+        return makeInterruptibleNativeEventChannel(fd,cipher);
+      },[&] {
+        class Observer final : public EventObserver {
+          void observe(const EventDiagnostic &) override {}
+        } observer;
+        const std::array<uint8_t,3> body{'a',0,'b'};
+        destructionReadFd = destructionAcceptedFd.load();
+        result = active->eventCommandExchange.postBinaryCommand(body,observer);
+        destructionCallbackCompleted = true;
+      }));
+  sockets.connectClient();
+  std::array<uint8_t,4096> request{};
+  ASSERT_GT(read_encrypted(sockets.client,&peer,request.data(),request.size()),0);
+  ASSERT_EQ(reading.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  ASSERT_FALSE(destructionCallbackCompleted.load());
+  observeDestructionCipherRelease = true;
+  session.reset();
+  observeDestructionCipherRelease = false;
+  EXPECT_TRUE(destructionCallbackCompleted.load());
+  EXPECT_EQ(result.status,EventStatus::closed);
+  EXPECT_EQ(destructionCipherReleaseCount,1);
 }

@@ -97,8 +97,8 @@ TEST_F(RequestSocket, FullHeaderWithoutDelimiterPerformsZeroLengthReadAndCloses)
 TEST_F(RequestSocket, CipherAdapterDecryptsActualEncryptedRequest) {
   const std::array<uint8_t, 32> keyMaterial{};
   auto &bundle = connection.ap2_pairing_context.control_cipher_bundle;
-  bundle.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT, 3, keyMaterial.data(), keyMaterial.size(), "");
-  ASSERT_NE(bundle.cipher_ctx, nullptr);
+  ASSERT_TRUE(bundle.prepare(PAIR_SERVER_HOMEKIT, 3, keyMaterial, "", "Control"));
+  EXPECT_FALSE(bundle.responsesEncrypted());
   std::unique_ptr<pair_cipher_context, decltype(&pair_cipher_free)> sender(
       pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL, 0, keyMaterial.data(), keyMaterial.size(), ""),
       pair_cipher_free);
@@ -115,5 +115,32 @@ TEST_F(RequestSocket, CipherAdapterDecryptsActualEncryptedRequest) {
   ASSERT_NE(message, nullptr);
   EXPECT_EQ(message->bodyText(), "abc");
   EXPECT_TRUE(message->requestsPath("/feedback"));
-  EXPECT_EQ(bundle.is_encrypted, 1);
+  EXPECT_TRUE(bundle.responsesEncrypted());
+
+  RtspMessage response;
+  response.respondWith(200);
+  const auto expected = response.responsePacket();
+  ASSERT_TRUE(expected);
+  ASSERT_EQ(msg_write_response(&connection,&response),0);
+  std::array<uint8_t,4096> reply{};
+  const auto count = read(peer,reply.data(),reply.size());
+  ASSERT_GT(count,0);
+  uint8_t *plain = nullptr; size_t plainLength = 0;
+  ASSERT_EQ(pair_decrypt(&plain,&plainLength,reply.data(),count,sender.get()),count);
+  std::unique_ptr<uint8_t,decltype(&std::free)> decoded(plain,std::free);
+  EXPECT_EQ(std::string_view(reinterpret_cast<char *>(decoded.get()),plainLength),*expected);
+}
+
+TEST_F(RequestSocket, PreparedControlCipherKeepsPairSetupResponsePlaintext) {
+  const std::array<uint8_t,32> key{};
+  auto &channel = connection.ap2_pairing_context.control_cipher_bundle;
+  ASSERT_TRUE(channel.prepare(PAIR_SERVER_HOMEKIT,3,key,"","Control"));
+  RtspMessage response; response.respondWith(200);
+  response.replaceBody(std::string_view("A\0B",3));
+  const auto expected = response.responsePacket(); ASSERT_TRUE(expected);
+  ASSERT_EQ(msg_write_response(&connection,&response),0);
+  std::array<char,4096> reply{};
+  const auto count = read(peer,reply.data(),reply.size()); ASSERT_GT(count,0);
+  EXPECT_EQ(std::string_view(reply.data(),count),*expected);
+  EXPECT_FALSE(channel.responsesEncrypted());
 }

@@ -2,6 +2,7 @@
 
 #include "session/session_category.h"
 #include "session/principal_participant.hpp"
+#include "session/ap2_pairing.hpp"
 #include "protocol/ap2/buffered_flush_policy.hpp"
 #include "runtime/common.h"
 #include "playback/player.h"

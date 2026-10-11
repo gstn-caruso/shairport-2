@@ -28,6 +28,7 @@
  */
 
 #include "session/session_state.hpp"
+#include "protocol/ap2/native_encrypted_channel.hpp"
 #include "audio/output/audio_player_adapter.hpp"
 #include "volume/volume_runtime.hpp"
 #include <arpa/inet.h>
@@ -186,107 +187,6 @@ play_lock_r get_play_lock(rtsp_conn_info *conn, int allow_session_interruption) 
   return response;
 }
 
-static void buf_add(sized_buffer *buf, uint8_t *in, size_t in_len) {
-  if (in_len == 0) return;
-  if (buf->length + in_len > buf->size) {
-    buf->size = buf->length + in_len + 2048; // Extra headroom to avoid future memcpy's
-    buf->data = static_cast<uint8_t *>(realloc(buf->data, buf->size));
-  }
-  memcpy(buf->data + buf->length, in, in_len);
-  buf->length += in_len;
-}
-
-static void buf_drain(sized_buffer *buf, ssize_t len) {
-  if (len < 0 || (size_t)len >= buf->length) {
-    free(buf->data);
-    memset(buf, 0, sizeof(sized_buffer));
-    return;
-  }
-  memmove(buf->data, buf->data + len, buf->length - len);
-  buf->length -= len;
-}
-
-void pair_cipher_bundle::release() {
-  buf_drain(&plaintext_read_buffer, -1);
-  buf_drain(&encrypted_read_buffer, -1);
-  if (description != nullptr)
-    free(description);
-  description = nullptr;
-  auto *cipher = cipher_ctx;
-  cipher_ctx = nullptr;
-  pair_cipher_free(cipher);
-}
-
-static size_t buf_remove(sized_buffer *buf, uint8_t *out, size_t out_len) {
-  size_t bytes = (buf->length > out_len) ? out_len : buf->length;
-  if (bytes != 0) memcpy(out, buf->data, bytes);
-  buf_drain(buf, bytes);
-  return bytes;
-}
-
-ssize_t read_encrypted(int fd, pair_cipher_bundle *ctx, void *buf, size_t count) {
-  ssize_t response = 0;
-  // If there is leftover decoded content from the last pass just return that
-  if (ctx->plaintext_read_buffer.length > 0) {
-    response = buf_remove(&ctx->plaintext_read_buffer, static_cast<uint8_t *>(buf), count);
-  } else {
-
-    // Otherwise read stuff in...
-    uint8_t in[4096];
-    uint8_t *plain = NULL; // may be allocated and reallocated by pair_decrypt
-    pthread_cleanup_push(malloc_cleanup, &plain);
-    size_t plain_len = 0;
-    do {
-      response = read(fd, in, sizeof(in));
-      if (response > 0) {
-        buf_add(&ctx->encrypted_read_buffer, in, response);
-        ssize_t consumed = pair_decrypt(&plain, &plain_len, ctx->encrypted_read_buffer.data,
-                                        ctx->encrypted_read_buffer.length, ctx->cipher_ctx);
-        if (consumed < 0) {
-          debug(1, "read_encrypted: abnormal exit from pair_decrypt: %zd.", consumed);
-          response = -1;
-        } else {
-          buf_drain(&ctx->encrypted_read_buffer, consumed);
-        }
-      }
-    } while ((plain_len == 0) && (response > 0));
-
-    if (response >= 0) {
-      buf_add(&ctx->plaintext_read_buffer, plain, plain_len);
-      response = buf_remove(&ctx->plaintext_read_buffer, static_cast<uint8_t *>(buf), count);
-    }
-    pthread_cleanup_pop(1);
-  }
-
-  return response;
-}
-
-ssize_t write_encrypted(int fd, pair_cipher_bundle *ctx, const void *buf, size_t count) {
-  uint8_t *encrypted;
-  size_t encrypted_len;
-
-  ssize_t ret = pair_encrypt(&encrypted, &encrypted_len, static_cast<const uint8_t *>(buf), count, ctx->cipher_ctx);
-  if (ret < 0) {
-    debug(1, "%s", pair_cipher_errmsg(ctx->cipher_ctx));
-    return -1;
-  }
-
-  size_t remain = encrypted_len;
-  // debug(1, "write to the \"%s\" channel", ctx->description);
-  // debug_print_buffer(1, (void *)buf, count);
-  // debug(1, "write encrypted:");
-  // debug_print_buffer(1, encrypted, encrypted_len);
-  while (remain > 0) {
-    ssize_t wrote = write(fd, encrypted + (encrypted_len - remain), remain);
-    if (wrote <= 0) {
-      free(encrypted);
-      return wrote;
-    }
-    remain -= wrote;
-  }
-  free(encrypted);
-  return count;
-}
 
 
 ssize_t read_from_rtsp_connection(rtsp_conn_info *conn, void *buf, size_t count) {
@@ -295,8 +195,8 @@ ssize_t read_from_rtsp_connection(rtsp_conn_info *conn, void *buf, size_t count)
 
   ssize_t result = 0; // closed
   if (conn->fd > 0) {
-    if (conn->ap2_pairing_context.control_cipher_bundle.cipher_ctx) {
-      conn->ap2_pairing_context.control_cipher_bundle.is_encrypted = 1;
+    if (conn->ap2_pairing_context.control_cipher_bundle.prepared()) {
+      conn->ap2_pairing_context.control_cipher_bundle.enableEncryptedResponses();
       result =
           read_encrypted(conn->fd, &conn->ap2_pairing_context.control_cipher_bundle, buf, count);
 
@@ -422,7 +322,7 @@ int msg_write_response(rtsp_conn_info *conn, RtspMessage *response) {
     return static_cast<int>(packet.error());
 
   ssize_t written;
-  if (conn->ap2_pairing_context.control_cipher_bundle.is_encrypted)
+  if (conn->ap2_pairing_context.control_cipher_bundle.responsesEncrypted())
     written = write_encrypted(conn->fd, &conn->ap2_pairing_context.control_cipher_bundle,
                               packet->data(), packet->size());
   else
@@ -1163,24 +1063,6 @@ void handle_pair_verify(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *res
     goto out;
   }
 
-  /*
-    ret = pair_verify_result(&result, conn->ap2_pairing_context.verify_ctx);
-    if (ret == 0 && result->shared_secret_len > 0) {
-      conn->ap2_pairing_context.control_cipher_bundle.cipher_ctx =
-          pair_cipher_new(PAIR_SERVER_HOMEKIT, 3, result->shared_secret, result->shared_secret_len);
-      if (!conn->ap2_pairing_context.control_cipher_bundle.cipher_ctx) {
-        debug(1, "Error setting up rtsp control channel ciphering\n");
-        goto out;
-      }
-      conn->ap2_pairing_context.event_cipher_bundle.cipher_ctx =
-          pair_cipher_new(PAIR_SERVER_HOMEKIT, 4, result->shared_secret, result->shared_secret_len);
-      if (!conn->ap2_pairing_context.event_cipher_bundle.cipher_ctx) {
-        debug(1, "Error setting up rtsp event channel ciphering\n");
-        goto out;
-      }
-    }
-  */
-
 out:
   replaceBodyFromAllocation(*resp, reinterpret_cast<char *>(body), body_len);
   if (body)
@@ -1250,25 +1132,20 @@ void handle_pair_setup(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp
   if (ret == 0 && conn->pair_setup_result->shared_secret_len > 0) {
     // Transient pairing completed (pair-setup step 2), prepare encryption, but
     // don't activate yet, the response to this request is still plaintext
-    conn->ap2_pairing_context.control_cipher_bundle.cipher_ctx =
-        pair_cipher_new(PAIR_SERVER_HOMEKIT, 3, conn->pair_setup_result->shared_secret,
-                        conn->pair_setup_result->shared_secret_len,
-                        ""); // last argument is the (possible) dynamic salt suffix
-    if (!conn->ap2_pairing_context.control_cipher_bundle.cipher_ctx) {
+    if (!conn->ap2_pairing_context.control_cipher_bundle.prepare(
+            PAIR_SERVER_HOMEKIT, 3,
+            {conn->pair_setup_result->shared_secret,conn->pair_setup_result->shared_secret_len},
+            "", "Control Stream")) {
       debug(1, "Error setting up rtsp control channel ciphering");
       goto out;
     }
-    conn->ap2_pairing_context.control_cipher_bundle.description = strdup("Control Stream");
-
-    conn->ap2_pairing_context.event_cipher_bundle.cipher_ctx =
-        pair_cipher_new(PAIR_SERVER_HOMEKIT, 4, conn->pair_setup_result->shared_secret,
-                        conn->pair_setup_result->shared_secret_len,
-                        ""); // last argument is the (possible) dynamic salt suffix
-    if (!conn->ap2_pairing_context.event_cipher_bundle.cipher_ctx) {
+    if (!conn->ap2_pairing_context.event_cipher_bundle.prepare(
+            PAIR_SERVER_HOMEKIT, 4,
+            {conn->pair_setup_result->shared_secret,conn->pair_setup_result->shared_secret_len},
+            "", "Event Stream")) {
       debug(1, "Error setting up rtsp event channel ciphering");
       goto out;
     }
-    conn->ap2_pairing_context.event_cipher_bundle.description = strdup("Event Stream");
   }
 
 out:
@@ -2356,12 +2233,10 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
             plist_get_uint_val(seed_item, &seed);
             char salt_suffix[256] = "";
             snprintf(salt_suffix, sizeof(salt_suffix), "%" PRIu64 "", seed);
-            conn->ap2_pairing_context.data_cipher_bundle.cipher_ctx =
-                pair_cipher_new(PAIR_SERVER_HOMEKIT, 5, conn->pair_setup_result->shared_secret,
-                                conn->pair_setup_result->shared_secret_len,
-                                salt_suffix); // last argument is the (possible) dynamic salt suffix
-            if (conn->ap2_pairing_context.data_cipher_bundle.cipher_ctx != NULL) {
-              conn->ap2_pairing_context.data_cipher_bundle.description = strdup("DataStream");
+            if (conn->ap2_pairing_context.data_cipher_bundle.prepare(
+                    PAIR_SERVER_HOMEKIT, 5,
+                    {conn->pair_setup_result->shared_secret,conn->pair_setup_result->shared_secret_len},
+                    salt_suffix, "DataStream")) {
               // get a port to use as an data port
               // bind a new TCP port and get a socket
               conn->local_data_port = 0; // any port

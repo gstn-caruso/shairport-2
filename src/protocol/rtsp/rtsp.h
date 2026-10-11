@@ -38,9 +38,6 @@ void rtsp_listener_stop(void);
 
 void stop_play(); // stop and drop a playing connection
 
-ssize_t read_encrypted(int fd, pair_cipher_bundle *ctx, void *buf, size_t count);
-ssize_t write_encrypted(int fd, pair_cipher_bundle *ctx, const void *buf, size_t count);
-
 void generateTxtDataValueInfo(rtsp_conn_info *conn, void **response, size_t *responseLength);
 plist_t generateInfoPlist(rtsp_conn_info *conn);
 char *plist_as_xml_text(plist_t the_plist); // caller must free the returned NUL-terminated string

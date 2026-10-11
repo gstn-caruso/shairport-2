@@ -904,6 +904,71 @@ regression runs in an isolated child, including under root, and verifies safe
 stop, retry, and destruction after failed worker creation. The parent retains
 its credentials and resource limits. Hosted CI remains the merge gate.
 
+The encrypted channel ownership slice applies Feature Envy (#77) and Long
+Method (#82). `EncryptedChannel` owns the pairing cipher, encrypted/plaintext
+buffers, description, and response activation behind byte IO and diagnostic
+ports. RTSP keeps pairing setup and channel/salt selection; the native event
+adapter borrows the owner until worker stop/join finishes. SessionState now
+owns the three channels in an ordinary C++ pairing header. The raw bundle and
+buffer types are removed from the C-compatible player header.
+
+The standalone target links the standard library, Threads, and the existing
+pairing library's sodium/gcrypt/plist dependencies. It does not link the receiver,
+FFmpeg, audio backend, configuration, or RTSP services. Link and actual sanitizer
+compile-command evidence is in `/tmp/encrypted-channel-standalone-linkage.log`
+and `/tmp/encrypted-channel-{asan,tsan}-instrumentation.log`.
+
+The local authentication-failure regression demonstrated the existing double
+free under ASan: the pairing implementation freed its plaintext output without
+clearing the caller's pointer. The separate fix clears the pointer and length,
+preserving the cipher algorithm and counter rollback. Red and green logs are
+`/tmp/encrypted-channel-failure-{red,green}.log`. The owner boundary red is
+`/tmp/encrypted-channel-boundary-red.log`; the subsequent stream suite uses real
+HomeKit encryption. It checks binary output, buffered leftovers without IO,
+complete-prefix fragmentation, partial EOF retention, short/terminal writes,
+failed-auth cleanup, and repeated release. The legacy one-byte prefix failure
+is deliberately preserved.
+
+Preparation leaves responses plaintext; the first encrypted control read
+activates encryption at the original runtime point. Actual native response
+tests compare both stages with the RTSP packet and pairing implementation.
+Release now clears activation as well as owned resources before cipher free;
+the old raw release retained an inert encrypted flag after destroying its
+cipher. Repreparation starts a fresh inactive channel. These lifecycle-state
+changes are explicit, with no claim about live re-pairing device acceptance.
+
+The full Release baseline passed 657 tests; final Release passed 668 tests
+(18.53 seconds). The focused regex `EncryptedChannel|PairCipher|RequestSocket|
+NativeEvent|EventPort|EventSetup|EventCommandRuntime|rtsp-message-c` passed 39
+cases in ASan+UBSan and TSan. Existing binary-plist event transactions and
+actual cooperative blocked read/write stops remain covered, without a
+cancellation workaround in the worker path. The separate legacy native-read
+cancellation fixture retains the previously documented TSan-only
+`CancellationWait` seam; its TSan result is not native cancellation evidence.
+Final logs are `/tmp/encrypted-channel-final-release.log` and
+`/tmp/encrypted-channel-{asan,tsan}.log`.
+
+Independent review identified direct SessionState destruction as a second
+lifetime path: member ordering destroyed the new cipher owners before the
+event worker's member destructor could join its callback. The focused native
+regression destroys an active session during an encrypted reply read and
+intercepts cipher free to require callback completion and accepted-descriptor
+closure first. Both observations fail on the previous implementation
+(`/tmp/encrypted-channel-destruction-red.log`). The SessionState destructor now
+stops/joins the event worker and closes the exchange before any member teardown,
+also protecting the callback's other borrowed session state. Its defaulted
+constructor and value-initialization contract remain unchanged.
+
+The review follow-up passes 669 full Release tests (18.57 seconds) and the same
+focused regex now passes 40 ASan+UBSan and 40 TSan cases. This new native
+destruction fixture uses cooperative interruption without `CancellationWait`.
+Evidence is `/tmp/encrypted-channel-destruction-{release,asan,tsan}.log`.
+
+This fixes the released-output double free (expected patch v6.1.14 through
+release automation). Broader pairing/handshake ownership, live Home/device
+acceptance, other worker cancellation, and performance measurements remain
+open. No installation or running service was changed.
+
 ## Release and installed validation
 
 Release automation produced **v6.0.0**, the expected major change for removing

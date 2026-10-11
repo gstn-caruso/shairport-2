@@ -11,6 +11,8 @@ std::unique_ptr<SessionState> SessionState::create(std::shared_ptr<SharedRtpTimi
 }
 
 SessionState::~SessionState() {
+  eventPortWorker.stop();
+  eventCommandExchange.close();
   playbackRun.stop();
   if (fd >= 0)
     close(fd);
