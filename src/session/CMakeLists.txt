@@ -11,3 +11,8 @@ set_target_properties(receiver-principal-selection PROPERTIES CXX_SCAN_FOR_MODUL
 target_compile_options(receiver-principal-selection PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
 target_link_libraries(receiver-principal-selection PUBLIC Threads::Threads)
 target_link_libraries(receiver PUBLIC receiver-principal-selection)
+add_library(receiver-pairing-session STATIC pairing_session.cpp)
+target_include_directories(receiver-pairing-session PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_compile_options(receiver-pairing-session PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
+target_link_libraries(receiver-pairing-session PUBLIC receiver-encrypted-channel pair_ap)
+target_link_libraries(receiver PUBLIC receiver-pairing-session)
