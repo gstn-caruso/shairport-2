@@ -35,6 +35,7 @@
 #include <net/if.h>
 #include "app/startup_options.hpp"
 #include "app/configuration_loader.hpp"
+#include "session/pairing_options.hpp"
 #include "app/configuration_validation.hpp"
 #include "app/receiver_application.hpp"
 #include "app/legacy_config_lease.hpp"
@@ -863,7 +864,10 @@ int ReceiverApplication::run(ReceiverSettings settings) {
   auto timingSettings = std::make_shared<SharedRtpTimingSettings>(
       processSettings->settings().audio().audio_backend_latency_offset);
   std::shared_ptr<PairingDirectoryPort> pairingDirectory = std::make_shared<PairingDirectory>();
-  int listenerError = rtsp_listener_start(timingSettings,pairingDirectory);
+  const auto &network = processSettings->settings().network();
+  auto pairingOptions = std::make_shared<const PairingOptions>(
+      PairingOptions{network.airplay_device_id,network.password});
+  int listenerError = rtsp_listener_start(timingSettings,pairingDirectory,pairingOptions);
   if (listenerError)
     die("Cannot create RTSP listener: %s", strerror(listenerError));
 

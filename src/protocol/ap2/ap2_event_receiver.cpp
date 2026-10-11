@@ -49,7 +49,7 @@ void stop_ap2_event_worker(SessionState *conn) {
 std::expected<void,int> start_ap2_event_worker(SessionState *conn,int listener) {
   return conn->eventPortWorker.start(listener,conn->eventCommandExchange,
       [conn](int accepted) {
-        return makeInterruptibleNativeEventChannel(accepted,conn->ap2_pairing_context.event_cipher_bundle);
+        return makeInterruptibleNativeEventChannel(accepted,conn->pairingSession.eventChannel());
       },[conn] {
         debug(2,"Connection %d: AP2 Event Receiver accepted a connection",conn->connection_number);
         ap2_event_send_update_info(conn);

@@ -20,7 +20,7 @@ protected:
   }
   void TearDown() override {
     msg_free(&message);
-    connection.ap2_pairing_context.control_cipher_bundle.release();
+    connection.pairingSession.controlChannel().release();
     close(peer);
   }
   void send(std::string_view bytes) {
@@ -96,7 +96,7 @@ TEST_F(RequestSocket, FullHeaderWithoutDelimiterPerformsZeroLengthReadAndCloses)
 
 TEST_F(RequestSocket, CipherAdapterDecryptsActualEncryptedRequest) {
   const std::array<uint8_t, 32> keyMaterial{};
-  auto &bundle = connection.ap2_pairing_context.control_cipher_bundle;
+  auto &bundle = connection.pairingSession.controlChannel();
   ASSERT_TRUE(bundle.prepare(PAIR_SERVER_HOMEKIT, 3, keyMaterial, "", "Control"));
   EXPECT_FALSE(bundle.responsesEncrypted());
   std::unique_ptr<pair_cipher_context, decltype(&pair_cipher_free)> sender(
@@ -133,7 +133,7 @@ TEST_F(RequestSocket, CipherAdapterDecryptsActualEncryptedRequest) {
 
 TEST_F(RequestSocket, PreparedControlCipherKeepsPairSetupResponsePlaintext) {
   const std::array<uint8_t,32> key{};
-  auto &channel = connection.ap2_pairing_context.control_cipher_bundle;
+  auto &channel = connection.pairingSession.controlChannel();
   ASSERT_TRUE(channel.prepare(PAIR_SERVER_HOMEKIT,3,key,"","Control"));
   RtspMessage response; response.respondWith(200);
   response.replaceBody(std::string_view("A\0B",3));

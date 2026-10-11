@@ -14,6 +14,7 @@
 #include <future>
 #include <atomic>
 #include <csignal>
+#include <gcrypt.h>
 #include "cancellation_wait.hpp"
 #include "protocol/ap2/ap2_event_receiver.h"
 
@@ -32,11 +33,29 @@ static std::atomic<bool> observeDestructionCipherRelease{false};
 static std::atomic<bool> destructionCallbackCompleted{false};
 static std::atomic<int> destructionAcceptedFd{-1};
 static int destructionCipherReleaseCount = 0;
+static int destructionSetupReleaseCount = 0, destructionVerifyReleaseCount = 0;
+extern "C" void __real_pair_setup_free(pair_setup_context *);
+extern "C" void __real_pair_verify_free(pair_verify_context *);
+static void requireCompletedEventLifetime() {
+  EXPECT_TRUE(destructionCallbackCompleted.load());
+  EXPECT_EQ(fcntl(destructionAcceptedFd.load(),F_GETFD),-1);
+}
+extern "C" void __wrap_pair_setup_free(pair_setup_context *context) {
+  if (context && observeDestructionCipherRelease.load()) {
+    requireCompletedEventLifetime(); ++destructionSetupReleaseCount;
+  }
+  __real_pair_setup_free(context);
+}
+extern "C" void __wrap_pair_verify_free(pair_verify_context *context) {
+  if (context && observeDestructionCipherRelease.load()) {
+    requireCompletedEventLifetime(); ++destructionVerifyReleaseCount;
+  }
+  __real_pair_verify_free(context);
+}
 extern "C" void __real_pair_cipher_free(pair_cipher_context *);
 extern "C" void __wrap_pair_cipher_free(pair_cipher_context *cipher) {
   if (cipher && observeDestructionCipherRelease.load()) {
-    EXPECT_TRUE(destructionCallbackCompleted.load());
-    EXPECT_EQ(fcntl(destructionAcceptedFd.load(),F_GETFD),-1);
+    requireCompletedEventLifetime();
     ++destructionCipherReleaseCount;
   }
   __real_pair_cipher_free(cipher);
@@ -175,7 +194,7 @@ TEST(EventCommandRuntime, BinaryPlistPostUsesRealEventCipherAcrossTwoTransaction
   SessionState session{};
   EncryptedChannel peer{};
   const std::array<uint8_t,32> key{};
-  auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
+  auto &cipher = session.pairingSession.eventChannel();
   ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
   ASSERT_TRUE(peer.prepare(PAIR_CLIENT_HOMEKIT_NORMAL,1,key,"","Peer"));
   ASSERT_TRUE(cipher.prepared()); ASSERT_TRUE(peer.prepared());
@@ -209,7 +228,7 @@ TEST(EventCommandRuntime, CancellationDuringNativeEncryptedResponseUnlocksAndClo
   int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
   SessionState session{}; EncryptedChannel peer{};
   const std::array<uint8_t,32> key{};
-  auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
+  auto &cipher = session.pairingSession.eventChannel();
   ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
   ASSERT_TRUE(peer.prepare(PAIR_CLIENT_HOMEKIT_NORMAL,1,key,"","Peer"));
   ASSERT_TRUE(cipher.prepared()); ASSERT_TRUE(peer.prepared());
@@ -250,7 +269,7 @@ struct WorkerLoopback {
 
 TEST(EventPortRuntime, NativeEncryptedTransactionsStopDuringReplyBeforeCipherRelease) {
   WorkerLoopback sockets; SessionState session{}; EncryptedChannel peer{};
-  auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
+  auto &cipher = session.pairingSession.eventChannel();
   const std::array<uint8_t,32> key{};
   ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
   ASSERT_TRUE(peer.prepare(PAIR_CLIENT_HOMEKIT_NORMAL,1,key,"","Peer"));
@@ -290,7 +309,7 @@ TEST(EventPortRuntime, NativeEncryptedTransactionsStopDuringReplyBeforeCipherRel
 
 TEST(EventPortRuntime, NativeEncryptedBlockedWriteStopsWithoutCancellation) {
   WorkerLoopback sockets; SessionState session{};
-  auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
+  auto &cipher = session.pairingSession.eventChannel();
   const std::array<uint8_t,32> key{};
   ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
   ASSERT_TRUE(cipher.prepared());
@@ -323,7 +342,14 @@ TEST(EventPortRuntime, DirectSessionDestructionJoinsNativeExchangeBeforeCipherRe
   WorkerLoopback sockets;
   auto session = std::make_unique<SessionState>();
   auto *active = session.get();
-  auto &cipher = active->ap2_pairing_context.event_cipher_bundle;
+  ASSERT_NE(gcry_check_version(nullptr),nullptr);
+  gcry_control(GCRYCTL_INITIALIZATION_FINISHED,0);
+  active->pairingSession.configure(std::make_shared<const PairingOptions>(
+      PairingOptions{"00:11:22:33:44:55",std::nullopt}));
+  const std::array<uint8_t,3> invalid{6,1,255};
+  ASSERT_EQ(active->pairingSession.setup(invalid).status,470);
+  ASSERT_EQ(active->pairingSession.verify(invalid).status,470);
+  auto &cipher = active->pairingSession.eventChannel();
   EncryptedChannel peer;
   const std::array<uint8_t,32> key{};
   ASSERT_TRUE(cipher.prepare(PAIR_SERVER_HOMEKIT,4,key,"","Event"));
@@ -332,6 +358,7 @@ TEST(EventPortRuntime, DirectSessionDestructionJoinsNativeExchangeBeforeCipherRe
   EventResult result{};
   destructionCallbackCompleted = false;
   destructionCipherReleaseCount = 0;
+  destructionSetupReleaseCount = destructionVerifyReleaseCount = 0;
   ASSERT_TRUE(active->eventPortWorker.start(std::exchange(sockets.listener,-1),active->eventCommandExchange,
       [&](int fd) {
         destructionAcceptedFd = fd;
@@ -356,4 +383,5 @@ TEST(EventPortRuntime, DirectSessionDestructionJoinsNativeExchangeBeforeCipherRe
   EXPECT_TRUE(destructionCallbackCompleted.load());
   EXPECT_EQ(result.status,EventStatus::closed);
   EXPECT_EQ(destructionCipherReleaseCount,1);
+  EXPECT_EQ(destructionSetupReleaseCount,1); EXPECT_EQ(destructionVerifyReleaseCount,1);
 }

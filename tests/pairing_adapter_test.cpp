@@ -25,7 +25,7 @@ void appendRecord(Bytes &bytes,std::string_view id,uint8_t value) {
 class PairingAdapter : public testing::Test {
 protected:
   std::unique_ptr<SessionState> owner = SessionState::create(
-      std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory());
+      std::make_shared<SharedRtpTimingSettings>(0),makeTestPairingDirectory(),makeTestPairingOptions());
   SessionState &session = *owner;
   std::vector<std::string> added;
   void SetUp() override { session.fd = -1; }

@@ -196,10 +196,10 @@ ssize_t read_from_rtsp_connection(rtsp_conn_info *conn, void *buf, size_t count)
 
   ssize_t result = 0; // closed
   if (conn->fd > 0) {
-    if (conn->ap2_pairing_context.control_cipher_bundle.prepared()) {
-      conn->ap2_pairing_context.control_cipher_bundle.enableEncryptedResponses();
+    if (conn->pairingSession.controlChannel().prepared()) {
+      conn->pairingSession.controlChannel().enableEncryptedResponses();
       result =
-          read_encrypted(conn->fd, &conn->ap2_pairing_context.control_cipher_bundle, buf, count);
+          read_encrypted(conn->fd, &conn->pairingSession.controlChannel(), buf, count);
 
     } else {
       result = read(conn->fd, buf, count);
@@ -323,8 +323,8 @@ int msg_write_response(rtsp_conn_info *conn, RtspMessage *response) {
     return static_cast<int>(packet.error());
 
   ssize_t written;
-  if (conn->ap2_pairing_context.control_cipher_bundle.responsesEncrypted())
-    written = write_encrypted(conn->fd, &conn->ap2_pairing_context.control_cipher_bundle,
+  if (conn->pairingSession.controlChannel().responsesEncrypted())
+    written = write_encrypted(conn->fd, &conn->pairingSession.controlChannel(),
                               packet->data(), packet->size());
   else
     written = write(conn->fd, packet->data(), packet->size());
@@ -942,6 +942,22 @@ void handle_pair_remove(rtsp_conn_info *conn __attribute__((unused)), RtspMessag
   debug_log_rtsp_message_conn(conn, 1, "pair-remove response", resp);
 }
 
+static void applyPairingReply(RtspMessage &response,const PairingReply &reply) {
+  response.respondWith(reply.status);
+  response.replaceBody({reinterpret_cast<const char *>(reply.body.data()),reply.body.size()});
+  if (reply.bodyPresent) response.addHeader("Content-Type","application/octet-stream");
+  switch (reply.diagnostic) {
+  case PairingDiagnostic::none: break;
+  case PairingDiagnostic::unconfigured: debug(1,"Pairing session is not configured"); break;
+  case PairingDiagnostic::setupCreationFailed: debug(1,"Error creating setup context"); break;
+  case PairingDiagnostic::verifyCreationFailed: debug(1,"Error creating verify context"); break;
+  case PairingDiagnostic::setupFailed:
+  case PairingDiagnostic::verifyFailed: debug(1,"%s",reply.error.c_str()); break;
+  case PairingDiagnostic::controlCipherFailed: debug(1,"Error setting up rtsp control channel ciphering"); break;
+  case PairingDiagnostic::eventCipherFailed: debug(1,"Error setting up rtsp event channel ciphering"); break;
+  }
+}
+
 void handle_pair_verify(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
   const char *hdr = req->headerValue("X-Apple-Client-Name");
   if (hdr) {
@@ -959,33 +975,9 @@ void handle_pair_verify(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *res
   debug(1, "Connection %d from \"%s\": handle_pair_verify, stage M%c, Content-Length %d",
         conn->connection_number, conn->ap2_client_name, mstage, req->bodyLength());
   debug_log_rtsp_message_conn(conn, 2, "pair-verify request", req);
-  int ret;
-  uint8_t *body = NULL;
-  size_t body_len = 0;
-  // struct pair_result *result;
-
-  if (!conn->ap2_pairing_context.verify_ctx) {
-    conn->ap2_pairing_context.verify_ctx =
-        pair_verify_new(PAIR_SERVER_HOMEKIT, NULL, NULL, NULL, config.airplay_device_id);
-    if (!conn->ap2_pairing_context.verify_ctx) {
-      debug(1, "Error creating verify context");
-      resp->respondWith(500); // Internal Server Error
-      goto out;
-    }
-  }
-
-  ret = pair_verify(&body, &body_len, conn->ap2_pairing_context.verify_ctx,
-                    (const uint8_t *)req->bodyData(), req->bodyLength());
-  if (ret < 0) {
-    debug(1, "%s", pair_verify_errmsg(conn->ap2_pairing_context.verify_ctx));
-    resp->respondWith(470); // Connection Authorization Required
-    goto out;
-  }
-
-out:
-  replaceBodyFromAllocation(*resp, reinterpret_cast<char *>(body), body_len);
-  if (body)
-    resp->addHeader("Content-Type", "application/octet-stream");
+  const auto reply = conn->pairingSession.verify(
+      {reinterpret_cast<const uint8_t *>(req->bodyData()),req->bodyLength()});
+  applyPairingReply(*resp,reply);
   debug_log_rtsp_message_conn(conn, 2, "pair-verify response", resp);
 }
 
@@ -1022,55 +1014,13 @@ void handle_pair_setup(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp
         conn->connection_number, conn->ap2_client_name, req->bodyLength());
   debug_log_rtsp_message_conn(conn, 2, "pair-setup request", req);
 
-  int ret;
-  uint8_t *body = NULL;
-  size_t body_len = 0;
   debug(3, "Connection %d: handle_pair_setup Content-Length %d", conn->connection_number,
         req->bodyLength());
   debug_log_rtsp_message(3, "handle_pair_setup", req);
 
-  if (!conn->ap2_pairing_context.setup_ctx) {
-    conn->ap2_pairing_context.setup_ctx =
-        pair_setup_new(PAIR_SERVER_HOMEKIT, config.password, NULL, NULL, config.airplay_device_id);
-    if (!conn->ap2_pairing_context.setup_ctx) {
-      debug(1, "Error creating setup context");
-      resp->respondWith(500); // Internal Server Error
-      goto out;
-    }
-  }
-
-  ret = pair_setup(&body, &body_len, conn->ap2_pairing_context.setup_ctx,
-                   (const uint8_t *)req->bodyData(), req->bodyLength());
-  if (ret < 0) {
-    debug(1, "%s", pair_setup_errmsg(conn->ap2_pairing_context.setup_ctx));
-    resp->respondWith(470); // Connection Authorization Required
-    goto out;
-  }
-
-  ret = pair_setup_result(NULL, &conn->pair_setup_result, conn->ap2_pairing_context.setup_ctx);
-  if (ret == 0 && conn->pair_setup_result->shared_secret_len > 0) {
-    // Transient pairing completed (pair-setup step 2), prepare encryption, but
-    // don't activate yet, the response to this request is still plaintext
-    if (!conn->ap2_pairing_context.control_cipher_bundle.prepare(
-            PAIR_SERVER_HOMEKIT, 3,
-            {conn->pair_setup_result->shared_secret,conn->pair_setup_result->shared_secret_len},
-            "", "Control Stream")) {
-      debug(1, "Error setting up rtsp control channel ciphering");
-      goto out;
-    }
-    if (!conn->ap2_pairing_context.event_cipher_bundle.prepare(
-            PAIR_SERVER_HOMEKIT, 4,
-            {conn->pair_setup_result->shared_secret,conn->pair_setup_result->shared_secret_len},
-            "", "Event Stream")) {
-      debug(1, "Error setting up rtsp event channel ciphering");
-      goto out;
-    }
-  }
-
-out:
-  replaceBodyFromAllocation(*resp, reinterpret_cast<char *>(body), body_len);
-  if (body)
-    resp->addHeader("Content-Type", "application/octet-stream");
+  const auto reply = conn->pairingSession.setup(
+      {reinterpret_cast<const uint8_t *>(req->bodyData()),req->bodyLength()});
+  applyPairingReply(*resp,reply);
   debug_log_rtsp_message_conn(conn, 2, "pair-setup response", resp);
 }
 
@@ -2150,12 +2100,8 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
           uint64_t seed = 0;
           if (seed_item != NULL) {
             plist_get_uint_val(seed_item, &seed);
-            char salt_suffix[256] = "";
-            snprintf(salt_suffix, sizeof(salt_suffix), "%" PRIu64 "", seed);
-            if (conn->ap2_pairing_context.data_cipher_bundle.prepare(
-                    PAIR_SERVER_HOMEKIT, 5,
-                    {conn->pair_setup_result->shared_secret,conn->pair_setup_result->shared_secret_len},
-                    salt_suffix, "DataStream")) {
+            const auto preparation = conn->pairingSession.prepareDataChannel(seed);
+            if (preparation == DataPreparation::prepared) {
               // get a port to use as an data port
               // bind a new TCP port and get a socket
               conn->local_data_port = 0; // any port
@@ -2173,6 +2119,9 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
 
               debug(2, "Connection %d SETUP (RC): TCP Remote Control data port opened: %u.",
                     conn->connection_number, conn->local_data_port);
+            } else if (preparation == DataPreparation::noSetupSecret) {
+              debug(1, "Connection %d: SETUP: No completed pairing setup secret for data channel.",
+                    conn->connection_number);
             } else {
               debug(1, "Connection %d: SETUP: Error setting up rtsp data channel ciphering.",
                     conn->connection_number);
@@ -2337,13 +2286,8 @@ void rtsp_conversation_thread_cleanup_function(void *arg) {
     debug(3, "Connection %d: terminating  -- closing timing, control and audio sockets...",
           conn->connection_number);
 
-    conn->ap2_pairing_context.control_cipher_bundle.release();
     conn->eventCommandExchange.close();
-    conn->ap2_pairing_context.event_cipher_bundle.release();
-    conn->ap2_pairing_context.data_cipher_bundle.release();
-
-    pair_setup_free(conn->ap2_pairing_context.setup_ctx);
-    pair_verify_free(conn->ap2_pairing_context.verify_ctx);
+    conn->pairingSession.release();
     if (conn->airplay_gid) {
       free(conn->airplay_gid);
       conn->airplay_gid = NULL;
@@ -2511,7 +2455,8 @@ static const char *format_address(struct sockaddr *fsa) {
 
 static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop,
                              const std::shared_ptr<SharedRtpTimingSettings> &timing,
-                             const std::shared_ptr<PairingDirectoryPort> &directory) {
+                             const std::shared_ptr<PairingDirectoryPort> &directory,
+                             const std::shared_ptr<const PairingOptions> &options) {
   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, nullptr);
   pthread_setname_np(pthread_self(), "listener");
   struct addrinfo hints, *info, *p;
@@ -2611,7 +2556,7 @@ static void rtsp_listen_loop(RtspListener &listener, std::stop_token stop,
 
       std::unique_ptr<SessionState> unregistered;
       try {
-        unregistered = SessionState::create(timing,directory);
+        unregistered = SessionState::create(timing,directory,options);
       } catch (const std::bad_alloc &) {
         close(acceptedSocket);
         warn("Couldn't allocate memory for an rtsp_conn_info record.");
@@ -2775,15 +2720,16 @@ static RtspListener &rtspListener() {
 }
 
 int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing,
-                        std::shared_ptr<PairingDirectoryPort> directory) {
-  if (!timing || !directory)
+                        std::shared_ptr<PairingDirectoryPort> directory,
+                        std::shared_ptr<const PairingOptions> options) {
+  if (!timing || !directory || !options)
     return EINVAL;
   try {
     auto &listener = rtspListener();
     atexit(rtsp_listener_stop);
-    listener.start([&listener, timing = std::move(timing), directory = std::move(directory)](std::stop_token stop) {
+    listener.start([&listener, timing = std::move(timing), directory = std::move(directory), options = std::move(options)](std::stop_token stop) {
       try {
-        rtsp_listen_loop(listener, stop, timing,directory);
+        rtsp_listen_loop(listener, stop, timing,directory,options);
       } catch (const std::exception &error) {
         warn("RTSP listener failed: %s", error.what());
         exit_request(EXIT_FAILURE);

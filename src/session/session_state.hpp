@@ -2,7 +2,7 @@
 
 #include "session/session_category.h"
 #include "session/principal_participant.hpp"
-#include "session/ap2_pairing.hpp"
+#include "session/pairing_session.hpp"
 #include "protocol/ap2/pairing_directory_port.hpp"
 #include "protocol/ap2/buffered_flush_policy.hpp"
 #include "runtime/common.h"
@@ -31,7 +31,8 @@
 struct SessionState : PrincipalParticipant {
   SessionState() = default;
   static std::unique_ptr<SessionState> create(std::shared_ptr<SharedRtpTimingSettings> timing,
-                                             std::shared_ptr<PairingDirectoryPort> directory);
+                                            std::shared_ptr<PairingDirectoryPort> directory,
+                                            std::shared_ptr<const PairingOptions> options);
   SharedRtpTimingSettings &timingSettings() const { return *timingSettings_; }
   PairingDirectoryPort &pairingDirectory() const { return *pairingDirectory_; }
   SessionState(const SessionState &) = delete;
@@ -119,8 +120,7 @@ struct SessionState : PrincipalParticipant {
   int ap2_rate;         // protect with flush mutex, 0 means don't play, 1 means play
   int ap2_play_enabled; // protect with flush mutex
 
-  ap2_pairing ap2_pairing_context;
-  struct pair_result *pair_setup_result; // need to keep the shared secret
+  PairingSession pairingSession;
 
   int data_socket;
   RemoteControlPeer remoteControlPeer;
