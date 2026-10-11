@@ -12,6 +12,7 @@
 #include <netinet/in.h>
 #include <future>
 #include <atomic>
+#include <csignal>
 #include "cancellation_wait.hpp"
 #include "protocol/ap2/ap2_event_receiver.h"
 
@@ -20,8 +21,20 @@ static int observedReadFd = -1;
 static std::atomic<bool> observeNativeRead{false};
 static std::promise<void> nativeReading;
 static CancellationWait encryptedReadCancellation;
+static std::atomic<int> observedWriteFd{-1};
+static std::promise<void> nativeWriting;
+static std::atomic<int> cooperativeReadFd{-1};
+static std::promise<void> cooperativeReading;
+extern "C" ssize_t __real_write(int,const void *,size_t);
+extern "C" ssize_t __wrap_write(int fd,const void *bytes,size_t count) {
+  int expected = fd;
+  if (observedWriteFd.compare_exchange_strong(expected,-1)) nativeWriting.set_value();
+  return __real_write(fd,bytes,count);
+}
 extern "C" ssize_t __real_read(int,void *,size_t);
 extern "C" ssize_t __wrap_read(int fd,void *bytes,size_t count) {
+  int expected = fd;
+  if (cooperativeReadFd.compare_exchange_strong(expected,-1)) cooperativeReading.set_value();
   if (fd == observedReadFd && observeNativeRead.exchange(false)) {
     nativeReading.set_value();
 #if __has_feature(thread_sanitizer)
@@ -199,4 +212,91 @@ TEST(EventCommandRuntime, CancellationDuringNativeEncryptedResponseUnlocksAndClo
   closing.get(); EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1);
   EXPECT_NE(cipher.cipher_ctx,nullptr);
   cipher.release(); peer.release(); close(sockets[1]); observedReadFd = -1;
+}
+
+struct WorkerLoopback {
+  int listener = socket(AF_INET,SOCK_STREAM | SOCK_CLOEXEC,0);
+  int client = socket(AF_INET,SOCK_STREAM | SOCK_CLOEXEC,0);
+  sockaddr_in address{};
+  WorkerLoopback() {
+    address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    EXPECT_EQ(bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
+    socklen_t size = sizeof(address);
+    EXPECT_EQ(getsockname(listener,reinterpret_cast<sockaddr *>(&address),&size),0);
+    const timeval timeout{2,0};
+    EXPECT_EQ(setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout)),0);
+  }
+  ~WorkerLoopback() { if (listener >= 0) close(listener); close(client); }
+  void connectClient() { ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0); }
+};
+
+TEST(EventPortRuntime, NativeEncryptedTransactionsStopDuringReplyBeforeCipherRelease) {
+  WorkerLoopback sockets; SessionState session{}; pair_cipher_bundle peer{};
+  auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
+  const std::array<uint8_t,32> key{};
+  cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
+  peer.cipher_ctx = pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL,1,key.data(),key.size(),"");
+  ASSERT_NE(cipher.cipher_ctx,nullptr); ASSERT_NE(peer.cipher_ctx,nullptr);
+  std::atomic<int> accepted{-1}; std::vector<ssize_t> counts;
+  auto reading = cooperativeReading.get_future();
+  std::promise<void> completed; auto done = completed.get_future();
+  ASSERT_TRUE(session.eventPortWorker.start(std::exchange(sockets.listener,-1),session.eventCommandExchange,
+      [&](int fd) { accepted = fd; return makeInterruptibleNativeEventChannel(fd,cipher); },[&] {
+        auto command = plist_new_string("ordinary command");
+        for (int i = 0; i < 3; ++i) {
+          if (i == 2) cooperativeReadFd = accepted.load();
+          counts.push_back(ap2_event_port_post_command(&session,command));
+        }
+        plist_free(command); completed.set_value();
+      }));
+  sockets.connectClient(); std::vector<uint8_t> first;
+  for (int i = 0; i < 3; ++i) {
+    std::array<uint8_t,4096> request{};
+    const auto count = read_encrypted(sockets.client,&peer,request.data(),request.size());
+    ASSERT_GT(count,0);
+    const std::vector<uint8_t> bytes(request.begin(),request.begin()+count);
+    if (i == 0) first = bytes; else EXPECT_EQ(bytes,first);
+    if (i < 2) {
+      const std::array<uint8_t,3> reply{'o',0,'k'};
+      EXPECT_EQ(write_encrypted(sockets.client,&peer,reply.data(),reply.size()),3);
+    }
+  }
+  ASSERT_EQ(reading.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  EXPECT_EQ(done.wait_for(std::chrono::milliseconds(30)),std::future_status::timeout);
+  auto stopping = std::async(std::launch::async,[&]{ return session.eventPortWorker.stop(); });
+  ASSERT_EQ(stopping.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  EXPECT_EQ(stopping.get(),0); EXPECT_EQ(counts,(std::vector<ssize_t>{3,3,0}));
+  EXPECT_EQ(fcntl(accepted.load(),F_GETFD),-1); EXPECT_NE(cipher.cipher_ctx,nullptr);
+  cipher.release(); peer.release();
+}
+
+TEST(EventPortRuntime, NativeEncryptedBlockedWriteStopsWithoutCancellation) {
+  WorkerLoopback sockets; SessionState session{};
+  auto &cipher = session.ap2_pairing_context.event_cipher_bundle;
+  const std::array<uint8_t,32> key{};
+  cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
+  ASSERT_NE(cipher.cipher_ctx,nullptr);
+  struct IgnoreBrokenPipe {
+    struct sigaction previous{};
+    IgnoreBrokenPipe() { struct sigaction ignored{}; ignored.sa_handler = SIG_IGN; sigaction(SIGPIPE,&ignored,&previous); }
+    ~IgnoreBrokenPipe() { sigaction(SIGPIPE,&previous,nullptr); }
+  } ignored;
+  std::promise<void> completed; auto done = completed.get_future();
+  auto writing = nativeWriting.get_future(); EventResult result{};
+  ASSERT_TRUE(session.eventPortWorker.start(std::exchange(sockets.listener,-1),session.eventCommandExchange,
+      [&](int fd) {
+        const int size = 4096; setsockopt(fd,SOL_SOCKET,SO_SNDBUF,&size,sizeof(size));
+        observedWriteFd = fd; return makeInterruptibleNativeEventChannel(fd,cipher);
+      },[&] {
+        const std::vector<uint8_t> body(8*1024*1024,'x');
+        class Observer : public EventObserver { void observe(const EventDiagnostic &) override {} } observer;
+        result = session.eventCommandExchange.postBinaryCommand(body,observer); completed.set_value();
+      }));
+  sockets.connectClient();
+  ASSERT_EQ(writing.wait_for(std::chrono::seconds(2)),std::future_status::ready);
+  EXPECT_EQ(done.wait_for(std::chrono::milliseconds(30)),std::future_status::timeout);
+  auto stopping = std::async(std::launch::async,[&]{ return session.eventPortWorker.stop(); });
+  ASSERT_EQ(stopping.wait_for(std::chrono::seconds(2)),std::future_status::ready);
+  EXPECT_EQ(stopping.get(),0); EXPECT_EQ(result.status,EventStatus::writeFailed);
+  EXPECT_NE(cipher.cipher_ctx,nullptr); cipher.release();
 }
