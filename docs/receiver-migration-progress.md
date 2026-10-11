@@ -514,6 +514,60 @@ AP2 control timing/anchor policy, whole-worker cooperative stopping, device
 acceptance, and controlled performance measurements remain open. No package
 installation or live restart was performed.
 
+The control packet slice applies Long Method (#82) and God Service (#78) through
+the standard-library module `receiver.protocol.ap2.control_packet`.
+`ControlPacketCoordinator` owns initialization, packet counting, stale/drop gates,
+routes, and ordered effects; `ControlLatency` owns checked latency arithmetic.
+The complete AP2 control decision loop is removed from `rtp.cpp`. Runtime retains
+`recvfrom`, peer address storage, effect formatting/application, shared configuration
+writes, anchor publication, D6 authentication/submission, and cancellation cleanup.
+The control-only session initialization field is removed. A focused standard
+function supplies random draws without linking control to realtime crypto.
+
+The fixed start-time gate preserves signed elapsed time, strict two-millisecond
+non-sentinel rejection, and sentinel bypass. Initialization occurs even on the
+first read error; sub-28-byte datagrams do not draw. First-packet counting precedes
+random dropping, fraction zero bypasses RNG, and equality drops. Realtime
+EAGAIN/EWOULDBLOCK resets the anchor/count; buffered timeout remains silent.
+Admitted effects request peer capture only if runtime storage is absent. D7
+clock/time/frame values are copied in big-endian order, and anchor subtraction
+wraps as before. D6 and unknown actions borrow the current packet only until
+the next read; malformed diagnostics own their byte count. Eight bounded slots
+hold ordered effects without a heap-backed event list.
+
+Backend buffer/offset and the session warning flag remain live per-packet inputs.
+Warning/zero-offset effects retain the compatibility write to shared configuration,
+and an already-issued warning retains a negative calculated latency. This shared
+offset and runtime peer ownership remain migration gaps. RTSP starts the control
+worker before optional input sample-rate setup, so finite zero-rate early anchors
+remain valid: normal stream latency stays 88200, with no warning/offset change.
+Zero-rate nonpositive warning diagnostics represent infinity/NaN explicitly while
+retaining warn-once, offset, latency, and anchor effects.
+
+The separate safety fix checks finite truncated frame conversions and widens
+latency arithmetic before checking int32 result ranges. The original calculator
+and real UDP handler both produced recorded UBSan failures for INT32_MAX plus
+11025. Such invalid calculations now produce a typed diagnostic without latency
+or anchor publication. Normal/truncated fractional boundaries and signed frame
+wrap remain preserved. This requires `fix` classification and the automated patch
+release expected v6.1.8; no version is incremented manually.
+
+The original sentinel-D7 UDP characterization verified actual anchor ownership,
+big-endian fields, latency, shared-offset reset and warning state before extraction.
+Thirteen standalone cases cover latency bounds, initialization, stale/drop gates,
+timeouts, routes, live settings, borrowed views, and owned anchor metadata. Four
+real control cases cover normal publication, invalid timing rejection, positive
+early zero-rate anchors, and zero-rate negative warn-once effects. Existing realtime
+D6 authentication and native cancellation fixtures remain in focused checks.
+The Release baseline passes 580/580 in 17.54 seconds; the final suite passes
+597/597 in 17.71 seconds. ASan+UBSan and TSan each pass 54/54 focused cases.
+The independent control link contains only its component and GoogleTest, and
+both production module objects contain sanitizer instrumentation. Evidence is
+preserved under `/tmp/control-coordinator-*`; review and hosted CI remain pending.
+Shared configuration isolation, full cooperative worker shutdown, device acceptance,
+and controlled performance measurements remain open. No package installation or
+live restart was performed.
+
 Each delivered PR received independent review and passed all four AMD64 CI
 configurations before merge. The Stage 1 work includes a non-silent stereo ALAC
 fixture comparing every decoded sample; a temporary left/right decoder-plane
