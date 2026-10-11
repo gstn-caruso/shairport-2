@@ -50,15 +50,16 @@ void ControlDatagramChannel::release() {
 bool ControlDatagramChannel::stopped() { std::lock_guard lock(mutex_); return stopped_; }
 void ControlDatagramChannel::deactivateAndRequestStop() {
   int wake;
+  SendLease wakeLease;
   {
     std::lock_guard lock(mutex_);
     active_ = false; stopped_ = true;
     wake = wake_; if (wake < 0) return;
     ++operations_;
+    wakeLease = SendLease(this,fd_,wake);
   }
   const uint64_t signal = 1;
   while (write(wake,&signal,sizeof(signal)) < 0 && errno == EINTR) {}
-  release();
 }
 void ControlDatagramChannel::close() {
   int previous;

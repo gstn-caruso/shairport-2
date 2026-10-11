@@ -10,11 +10,19 @@
 #include <utility>
 #include <atomic>
 #include <poll.h>
+#include "cancellation_wait.hpp"
 
 static std::atomic<bool> blockedKernel{false};
 static std::atomic<unsigned> sends{0},polls{0};
 static std::atomic<bool> observeReceivePoll{false};
 static std::promise<void> receivePolling;
+static std::atomic<bool> cancelStopSignal{false};
+static CancellationWait stopSignalWait;
+extern "C" ssize_t __real_write(int,const void *,size_t);
+extern "C" ssize_t __wrap_write(int fd,const void *bytes,size_t size) {
+  if (cancelStopSignal.load()) stopSignalWait.block();
+  return __real_write(fd,bytes,size);
+}
 extern "C" ssize_t __real_sendto(int,const void *,size_t,int,const sockaddr *,socklen_t);
 extern "C" ssize_t __wrap_sendto(int fd,const void *bytes,size_t length,int flags,const sockaddr *peer,socklen_t size) {
   if (!blockedKernel.load()) return __real_sendto(fd,bytes,length,flags,peer,size);
@@ -175,4 +183,20 @@ TEST(ControlDatagramChannel, NativePollCancellationReleasesReceiveLeaseBeforeClo
   ASSERT_EQ(polling.wait_for(500ms),std::future_status::ready);
   EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0);
   owner.close(); EXPECT_EQ(fcntl(fd,F_GETFD),-1);
+}
+
+TEST(ControlDatagramChannel, CancelledStopSignalReleasesTransientWakeLease) {
+  DatagramEndpoint endpoint;
+  ControlDatagramChannel owner;
+  ASSERT_EQ(owner.adopt(std::exchange(endpoint.fd,-1)),0);
+  cancelStopSignal = true;
+  pthread_t worker;
+  ASSERT_EQ(pthread_create(&worker,nullptr,[](void *context)->void * {
+    static_cast<ControlDatagramChannel *>(context)->deactivateAndRequestStop();
+    return nullptr;
+  },&owner),0);
+  stopSignalWait.waitForBlocked(1);
+  EXPECT_EQ(pthread_cancel(worker),0); EXPECT_EQ(pthread_join(worker,nullptr),0);
+  cancelStopSignal = false;
+  owner.close();
 }
