@@ -57,7 +57,38 @@ ControlDecision ControlPacketCoordinator::handle(ControlRead read,ControlLiveSet
     decision.append({ControlEffectKind::diagnosticDrop}); return decision;
   }
   decision.append({ControlEffectKind::capturePeerIfAbsent});
-  if (read.bytes[1] == 0xd6) decision.append({ControlEffectKind::retransmit,read.bytes.subspan(6)});
+  if (read.bytes[1] == 0xd7) {
+    const auto bigEndian = [&read](std::size_t offset,unsigned count) {
+      std::uint64_t value = 0;
+      for (unsigned index = 0; index < count; ++index) value = (value << 8) | read.bytes[offset+index];
+      return value;
+    };
+    const auto frame1 = static_cast<std::uint32_t>(bigEndian(4,4));
+    const auto frame2 = static_cast<std::uint32_t>(bigEndian(16,4));
+    const auto stream = std::bit_cast<std::int32_t>(frame2-frame1);
+    if (stream != 77175) {
+      ControlEffect unexpected{ControlEffectKind::unexpectedLatency}; unexpected.stream = stream;
+      decision.append(unexpected);
+    }
+    const auto latency = ControlLatency::calculate(frame1,frame2,settings.inputRate,
+        settings.backendBufferSeconds,settings.sharedOffsetSeconds,settings.warningIssued);
+    if (!latency) {
+      decision.append({ControlEffectKind::invalidLatency}); return decision;
+    }
+    if (latency->warnAndZero) {
+      ControlEffect warning{ControlEffectKind::warnAndZeroSharedOffset}; warning.stream = latency->stream;
+      decision.append(warning);
+    }
+    ControlEffect setLatency{ControlEffectKind::setLatency}; setLatency.latency = latency->total;
+    decision.append(setLatency);
+    ControlEffect anchor{ControlEffectKind::setAnchor};
+    anchor.clockId = bigEndian(20,8); anchor.timeNs = bigEndian(8,8); anchor.anchorFrame = frame1-11025;
+    decision.append(anchor);
+  } else if (read.bytes[1] == 0xd6) {
+    decision.append({ControlEffectKind::retransmit,read.bytes.subspan(6)});
+  } else {
+    decision.append({ControlEffectKind::unknown,read.bytes});
+  }
   return decision;
 }
 namespace {

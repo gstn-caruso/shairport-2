@@ -100,3 +100,56 @@ TEST(ControlPacketCoordinator, OnlyRealtimeTimeoutResetsCountAndRearmsFirstSenti
   auto restarted = coordinator.handle({packet,0,4},settings(),random);
   ASSERT_EQ(restarted.size(),3u); EXPECT_EQ(restarted[0].kind,ControlEffectKind::firstSentinel);
 }
+static std::vector<uint8_t> controlAnchor(uint32_t first = 100000,uint32_t second = 177175) {
+  auto bytes = controlBytes(0xd7);
+  const auto write = [&bytes](size_t offset,uint64_t value,unsigned count) {
+    for (unsigned index = 0; index < count; ++index) bytes[offset+index] = value >> (8*(count-index-1));
+  };
+  write(4,first,4); write(8,0x0102030405060708,8); write(16,second,4); write(20,0x1122334455667788,8);
+  return bytes;
+}
+TEST(ControlPacketCoordinator, AdmittedAnchorCopiesBigEndianFieldsAndOrdersPeerLatencyThenAnchor) {
+  ControlPacketCoordinator coordinator(0); auto packet = controlAnchor();
+  auto decision = coordinator.handle({packet,0,0},settings(),[]{ return 1.0; });
+  ASSERT_EQ(decision.size(),5u);
+  EXPECT_EQ(decision[0].kind,ControlEffectKind::initialized);
+  EXPECT_EQ(decision[1].kind,ControlEffectKind::firstSentinel);
+  EXPECT_EQ(decision[2].kind,ControlEffectKind::capturePeerIfAbsent);
+  EXPECT_EQ(decision[3].kind,ControlEffectKind::setLatency); EXPECT_EQ(decision[3].latency,83790);
+  EXPECT_EQ(decision[4].kind,ControlEffectKind::setAnchor);
+  std::fill(packet.begin(),packet.end(),0);
+  EXPECT_EQ(decision[4].clockId,0x1122334455667788u);
+  EXPECT_EQ(decision[4].timeNs,0x0102030405060708u);
+  EXPECT_EQ(decision[4].anchorFrame,88975u);
+}
+TEST(ControlPacketCoordinator, SharedOffsetWarningIsExplicitAndNextPacketObservesLiveSettings) {
+  ControlPacketCoordinator coordinator(0); auto packet = controlAnchor(); auto live = settings();
+  live.sharedOffsetSeconds = -10;
+  auto first = coordinator.handle({packet,0,0},live,[]{ return 1.0; });
+  ASSERT_EQ(first.size(),6u);
+  EXPECT_EQ(first[3].kind,ControlEffectKind::warnAndZeroSharedOffset);
+  EXPECT_EQ(first[4].latency,83790);
+  live.warningIssued = true; live.sharedOffsetSeconds = 0;
+  auto changed = coordinator.handle({packet,0,1},live,[]{ return 1.0; });
+  ASSERT_EQ(changed.size(),3u); EXPECT_EQ(changed[1].latency,83790);
+  live.sharedOffsetSeconds = -10;
+  auto alreadyWarned = coordinator.handle({packet,0,2},live,[]{ return 1.0; });
+  ASSERT_EQ(alreadyWarned.size(),3u); EXPECT_EQ(alreadyWarned[1].latency,-357210);
+}
+TEST(ControlPacketCoordinator, UnusualLatencyAndWrappingAnchorStayTypedWhileInvalidLatencyCannotPublish) {
+  ControlPacketCoordinator coordinator(0); auto unusual = controlAnchor(0,77176);
+  auto normal = coordinator.handle({unusual,0,0},settings(),[]{ return 1.0; });
+  ASSERT_EQ(normal.size(),6u); EXPECT_EQ(normal[3].kind,ControlEffectKind::unexpectedLatency);
+  EXPECT_EQ(normal[3].stream,77176); EXPECT_EQ(normal[5].anchorFrame,uint32_t{0}-11025u);
+  auto invalid = controlAnchor(0,0x7fffffff);
+  auto rejected = coordinator.handle({invalid,0,1},settings(),[]{ return 1.0; });
+  ASSERT_EQ(rejected.size(),3u); EXPECT_EQ(rejected[0].kind,ControlEffectKind::capturePeerIfAbsent);
+  EXPECT_EQ(rejected[1].kind,ControlEffectKind::unexpectedLatency);
+  EXPECT_EQ(rejected[2].kind,ControlEffectKind::invalidLatency);
+}
+TEST(ControlPacketCoordinator, UnknownAndRetransmitViewsBorrowOnlyCurrentPacketStorage) {
+  ControlPacketCoordinator coordinator(0); auto bytes = controlBytes(0x42);
+  auto unknown = coordinator.handle({bytes,0,0},settings(),[]{ return 1.0; });
+  ASSERT_EQ(unknown.size(),4u); EXPECT_EQ(unknown[3].kind,ControlEffectKind::unknown);
+  EXPECT_EQ(unknown[3].bytes.data(),bytes.data()); EXPECT_EQ(unknown[3].bytes.size(),28u);
+}
