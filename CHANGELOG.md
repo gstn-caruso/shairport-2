@@ -1,3 +1,9 @@
+## [6.1.8](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.7...v6.1.8) (2026-10-11)
+
+### Bug Fixes
+
+* **rtp:** bound latency arithmetic in an isolated control coordinator ([#63](https://github.com/gstn-caruso/shairport-sync/issues/63)) ([cc2702e](https://github.com/gstn-caruso/shairport-sync/commit/cc2702eaa015de1467524d72c200e384acf82ee2))
+
 ## [6.1.7](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.6...v6.1.7) (2026-10-11)
 
 ### Bug Fixes
