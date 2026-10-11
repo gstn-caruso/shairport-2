@@ -869,6 +869,70 @@ Other protocol/playback workers, whole-process cooperative shutdown, pairing
 decomposition, device/performance acceptance, and whole-goal completion remain
 open. No installation or live restart was performed.
 
+The pairing-management slice replaces RTSP's process-global raw linked list
+with application-owned `PairingDirectory`. The named module
+`receiver.protocol.ap2.pairing_directory` owns record ordering, public keys,
+and synchronization behind the ordinary-header `PairingDirectoryPort`.
+Only the application and module tests import the concrete directory. Listener,
+session, and native management dependencies use the typed port, avoiding a
+global forward declaration of a module-attached class and avoiding module
+imports across every SessionState consumer. Its independent library links only
+the standard library and Threads.
+
+The application constructs one shared directory and explicitly passes it with
+timing settings through listener startup and session construction. Both owners
+are required; there is no default/global pairing directory. The factory retains
+defaulted/value-initialized SessionState construction. Session teardown still
+joins event work before releasing borrowed resources. Two actual accepted
+sessions receive the same directory, complete naturally, and retain directory
+ownership after listener stop; separate application directories are isolated.
+The test-only directory factory confines concrete module imports to one helper
+translation unit for existing receiver-linked tests.
+
+`PairingManagement` alone translates synchronous HomeKit C callbacks into
+directory operations and owned response bytes. Per-call callback context is
+passed through cb_arg, allocation failures are captured without unwinding into
+C, and native malloc responses are released on success and error. Listing
+takes an owned snapshot before invoking native enumeration, so no directory
+lock spans a callback. A native enumeration fixture removes a record after the
+snapshot and verifies the complete original list bytes and the updated directory.
+RTSP retains client-name tracking, diagnostics, status/body/header mapping;
+the old linked-list implementation and callbacks are removed.
+
+Four frozen RTSP fixtures passed before extraction and preserve exact successful
+state/list TLVs, newest-first insertion, replacement without moving a record,
+missing-remove success, ignored list request bytes, 63-byte identifiers,
+64-byte rejection, and embedded-NUL C-string prefix behavior. Truncated input
+still returns 451 without mutation. A separate malformed-key regression failed
+under UBSan at the old null-key memcpy: pair_ap passes a null pointer when a
+public key is absent or has the wrong length and ignores callback return values.
+The first fix records a callback failure, releases the generated response, and
+returns 451 without mutation; the extracted management adapter preserves that
+fix through typed operation errors. Pairing algorithms and the C parser are
+unchanged.
+
+The original directory operations were unsynchronized across RTSP workers; no
+original TSan race reproduction is claimed. New bounded concurrent updates,
+removals, and snapshots verify consistent complete keys under TSan. Additional
+fixtures cover snapshot ownership and callback allocation failures. The Release
+baseline passed 669/669 in 18.57 seconds; final Release passed 683/683 in 26.31
+seconds while other builds ran. Focused ASan+UBSan passed 57/57 in 3.26 seconds
+and TSan 57/57 in 3.94 seconds, including C-header compatibility and existing
+event/cipher destruction checks. This is feedback evidence, not a controlled
+performance comparison. Standalone link and actual production instrumentation
+evidence is retained under `/tmp/pairing-directory-*` and
+`/tmp/pairing-management-*`; the malformed-key red report is
+`/tmp/pairing-directory-key-red.log`. Both new targets are covered by the own
+production source guard.
+
+Feature Envy (#77) places record decisions with their owner rather than RTSP.
+Independent review and hosted CI remain pending for this slice; the malformed
+key fix requires patch classification, with automated release expected v6.1.15.
+Setup/verify ownership, persistent pairing storage, authorization policy, bundled
+C migration, live Home/re-pairing acceptance, other workers, and controlled
+performance measurements remain outside this slice. No installation or service
+restart was performed.
+
 Each delivered PR received independent review and passed all four AMD64 CI
 configurations before merge. The Stage 1 work includes a non-silent stereo ALAC
 fixture comparing every decoded sample; a temporary left/right decoder-plane
