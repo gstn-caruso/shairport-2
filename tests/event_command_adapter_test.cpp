@@ -6,6 +6,41 @@
 #include <thread>
 #include <fcntl.h>
 #include <unistd.h>
+#include <semaphore>
+#include <sys/wait.h>
+#include <netinet/in.h>
+#include "protocol/ap2/ap2_event_receiver.h"
+
+static std::binary_semaphore updateInfoObserved{0};
+extern "C" ssize_t __wrap_ap2_event_send_update_info(rtsp_conn_info *) {
+  updateInfoObserved.release(); return 0;
+}
+
+static int receiverWithDescriptorZero() {
+  const int listener = socket(AF_INET,SOCK_STREAM,0),client = socket(AF_INET,SOCK_STREAM,0);
+  if (listener < 0 || client < 0) return 10;
+  sockaddr_in address{}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)) || listen(listener,1)) return 11;
+  socklen_t length = sizeof(address);
+  if (getsockname(listener,reinterpret_cast<sockaddr *>(&address),&length) ||
+      connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address))) return 12;
+  SessionState session{}; session.event_socket = listener;
+  close(STDIN_FILENO);
+  pthread_t worker;
+  if (pthread_create(&worker,nullptr,ap2_event_receiver,&session)) return 13;
+  const bool observed = updateInfoObserved.try_acquire_for(std::chrono::milliseconds(500));
+  if (observed) pthread_cancel(worker);
+  pthread_join(worker,nullptr);
+  close(listener); close(client);
+  return observed && fcntl(STDIN_FILENO,F_GETFD) == -1 ? 0 : 14;
+}
+
+TEST(EventCommandRuntime, ReceiverAttachesAcceptedDescriptorZeroAndCleanupClosesIt) {
+  const pid_t child = fork(); ASSERT_GE(child,0);
+  if (child == 0) _exit(receiverWithDescriptorZero());
+  int status; ASSERT_EQ(waitpid(child,&status,0),child);
+  ASSERT_TRUE(WIFEXITED(status)); EXPECT_EQ(WEXITSTATUS(status),0);
+}
 
 ssize_t ap2_event_port_post_command(rtsp_conn_info *,plist_t);
 TEST(NativeEventChannel, CloseOwnsAcceptedFdWithoutAccessingReleasedCipher) {
@@ -15,6 +50,18 @@ TEST(NativeEventChannel, CloseOwnsAcceptedFdWithoutAccessingReleasedCipher) {
   EXPECT_NE(fcntl(sockets[0],F_GETFD),-1);
   cipher.release(); channel.reset();
   EXPECT_EQ(fcntl(sockets[0],F_GETFD),-1); close(sockets[1]);
+}
+
+TEST(NativeEventChannel, RejectedAttachmentClosesOnlyCandidateDescriptor) {
+  int first[2],second[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,first),0);
+  ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,second),0);
+  pair_cipher_bundle cipher{};
+  EventCommandExchange exchange;
+  ASSERT_TRUE(exchange.attach(makeNativeEventChannel(first[0],cipher)));
+  EXPECT_FALSE(exchange.attach(makeNativeEventChannel(second[0],cipher)));
+  EXPECT_EQ(fcntl(second[0],F_GETFD),-1); EXPECT_NE(fcntl(first[0],F_GETFD),-1);
+  exchange.close(); EXPECT_EQ(fcntl(first[0],F_GETFD),-1);
+  close(first[1]); close(second[1]);
 }
 TEST(EventCommandRuntime, BinaryPlistPostUsesRealEventCipherAcrossTwoTransactions) {
   int sockets[2]; ASSERT_EQ(socketpair(AF_UNIX,SOCK_STREAM,0,sockets),0);
@@ -27,8 +74,7 @@ TEST(EventCommandRuntime, BinaryPlistPostUsesRealEventCipherAcrossTwoTransaction
   cipher.cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT,4,key.data(),key.size(),"");
   peer.cipher_ctx = pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL,1,key.data(),key.size(),"");
   ASSERT_NE(cipher.cipher_ctx,nullptr); ASSERT_NE(peer.cipher_ctx,nullptr);
-  ASSERT_EQ(pthread_mutex_init(&session.event_sender_mutex,nullptr),0);
-  session.event_channel_fd = sockets[0];
+  ASSERT_TRUE(session.eventCommandExchange.attach(makeNativeEventChannel(sockets[0],cipher)));
   std::vector<std::vector<uint8_t>> received;
   const std::vector<std::vector<uint8_t>> replies{{'o',0,'k'},{'n','e','x','t'}};
   std::thread client([&] {
@@ -50,6 +96,6 @@ TEST(EventCommandRuntime, BinaryPlistPostUsesRealEventCipherAcrossTwoTransaction
   const std::string header = "POST /command RTSP/1.0\r\nContent-Length: 45\r\nContent-Type: application/x-apple-binary-plist\r\n\r\n";
   std::vector<uint8_t> expected(header.begin(),header.end()); expected.insert(expected.end(),binary.begin(),binary.end());
   ASSERT_EQ(received.size(),2u); EXPECT_EQ(received[0],expected); EXPECT_EQ(received[1],expected);
-  close(sockets[0]); close(sockets[1]); pthread_mutex_destroy(&session.event_sender_mutex);
+  session.eventCommandExchange.close(); close(sockets[1]);
   cipher.release(); peer.release();
 }

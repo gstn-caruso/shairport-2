@@ -10,6 +10,7 @@
 #include "protocol/rtp/resend_coordinator.hpp"
 #include "transport/remote_control_peer.hpp"
 #include "transport/control_datagram_channel.hpp"
+#include "protocol/ap2/event_command_exchange.hpp"
 #include "audio/decoding/audio_decoder.hpp"
 #include "audio/format/audio_input_state.hpp"
 #include "audio/resampling/resampler.hpp"
@@ -104,8 +105,7 @@ struct SessionState : PrincipalParticipant {
   pthread_t rtp_ap2_control_thread;
   pthread_t rtp_realtime_audio_thread;
   pthread_t rtp_buffered_audio_thread;
-  pthread_mutex_t event_sender_mutex;
-  int event_channel_fd; // zero if closed, controlled by event_sender_mutex
+  EventCommandExchange eventCommandExchange;
 
   int ap2_event_receiver_exited;
 
