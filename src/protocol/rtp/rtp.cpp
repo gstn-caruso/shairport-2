@@ -137,7 +137,7 @@ void check32conversion(const char *prompt, const uint8_t *source, uint32_t value
 }
 
 void rtp_initialise(rtsp_conn_info *conn) {
-  conn->rtp_time_of_last_resend_request_error_ns = 0;
+  conn->resendCoordinator.reset();
   conn->rtp_running = 0;
   // initialise the timer mutex
   int rc = pthread_mutex_init(&conn->reference_time_mutex, NULL);
@@ -153,71 +153,58 @@ void rtp_terminate(rtsp_conn_info *conn) {
     debug(1, "Error destroying reference_time_mutex variable.");
 }
 
-void rtp_request_resend(seq_t first, uint32_t count, rtsp_conn_info *conn) {
-  // debug(1, "rtp_request_resend of %u packets from sequence number %u.", count, first);
-  if (conn->rtp_running) {
-    // if (!request_sent) {
-    // debug(2, "requesting resend of %d packets starting at %u.", count, first);
-    //  request_sent = 1;
-    //}
-
-    char req[8]; // *not* a standard RTCP NACK
-    req[0] = 0x80;
-
-      if (conn->ap2_remote_control_socket_addr_length == 0) {
-        debug(2, "No remote socket -- skipping the resend");
-        return; // hack
-      }
-      req[1] = 0xD5; // Airplay 2 'resend'
-
-    *(unsigned short *)(req + 2) = htons(1);     // our sequence number
-    *(unsigned short *)(req + 4) = htons(first); // missed seqnum
-    *(unsigned short *)(req + 6) = htons(count); // count
-
-    uint64_t time_of_sending_ns = get_absolute_time_in_ns();
-    uint64_t resend_error_backoff_time = 300000000; // 0.3 seconds
-    if ((conn->rtp_time_of_last_resend_request_error_ns == 0) ||
-        ((time_of_sending_ns - conn->rtp_time_of_last_resend_request_error_ns) >
-         resend_error_backoff_time)) {
-      if ((config.diagnostic_drop_packet_fraction == 0.0) ||
-          (drand48() > config.diagnostic_drop_packet_fraction)) {
-        // put a time limit on the sendto
-
-        struct timeval timeout;
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 100000;
-        int response;
-
-          if (setsockopt(conn->ap2_control_socket, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout,
-                         sizeof(timeout)) < 0)
-            debug(1, "Can't set timeout on resend request socket.");
-          response = sendto(conn->ap2_control_socket, req, sizeof(req), 0,
-                            (struct sockaddr *)&conn->ap2_remote_control_socket_addr,
-                            conn->ap2_remote_control_socket_addr_length);
-
-        if (response == -1) {
-          char em[1024];
-          strerror_r(errno, em, sizeof(em));
-          debug(2, "Error %d using sendto to request a resend: \"%s\".", errno, em);
-          conn->rtp_time_of_last_resend_request_error_ns = time_of_sending_ns;
-        } else {
-          conn->rtp_time_of_last_resend_request_error_ns = 0;
-        }
-
-      } else {
-        debug(3, "Dropping resend request packet to simulate a bad network. Backing off for 0.3 "
-                 "second.");
-        conn->rtp_time_of_last_resend_request_error_ns = time_of_sending_ns;
-      }
-    } else {
-      debug(1,
-            "Suppressing a resend request due to a resend sendto error in the last 0.3 seconds.");
+class NativeResendIo final : public ResendIo {
+public:
+  NativeResendIo(int socket,RemoteControlPeerSnapshot peer) : socket_(socket),peer_(peer) {}
+  uint64_t nowNs() override { return get_absolute_time_in_ns(); }
+  double draw() override { return drand48(); }
+  ResendSendResult send(std::span<const uint8_t,8> packet) override {
+    const timeval timeout{0,100000};
+    int timeoutError = 0;
+    if (setsockopt(socket_,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout)) < 0) {
+      timeoutError = errno;
+      debug(1,"Can't set timeout on resend request socket.");
     }
-  } else {
-    // if (!request_sent) {
-    debug(2, "rtp_request_resend called without active stream!");
-    //  request_sent = 1;
-    //}
+    const auto count = sendto(socket_,packet.data(),packet.size(),0,
+                             reinterpret_cast<const sockaddr *>(&peer_.address),peer_.length);
+    const int error = count == -1 ? errno : 0;
+    return {count,error,timeoutError};
+  }
+private:
+  int socket_;
+  RemoteControlPeerSnapshot peer_;
+};
+
+void rtp_request_resend(seq_t first,uint32_t count,rtsp_conn_info *conn) {
+  if (!conn->rtp_running) {
+    debug(2,"rtp_request_resend called without active stream!");
+    return;
+  }
+  const auto peer = conn->remoteControlPeer.snapshot();
+  if (!peer) {
+    debug(2,"No remote socket -- skipping the resend");
+    return;
+  }
+  NativeResendIo io(conn->ap2_control_socket,*peer);
+  const auto outcome = conn->resendCoordinator.request(
+      true,true,first,count,config.diagnostic_drop_packet_fraction,io);
+  switch (outcome.status) {
+  case ResendStatus::sendFailed: {
+    char message[1024];
+    strerror_r(outcome.errorCode,message,sizeof(message));
+    debug(2,"Error %d using sendto to request a resend: \"%s\".",outcome.errorCode,message);
+    break;
+  }
+  case ResendStatus::dropped:
+    debug(3,"Dropping resend request packet to simulate a bad network. Backing off for 0.3 second.");
+    break;
+  case ResendStatus::suppressed:
+    debug(1,"Suppressing a resend request due to a resend sendto error in the last 0.3 seconds.");
+    break;
+  case ResendStatus::inactive:
+  case ResendStatus::noPeer:
+  case ResendStatus::sent:
+    break;
   }
 }
 
@@ -371,9 +358,7 @@ void rtp_ap2_control_handler_cleanup_handler(void *arg) {
   safe_socket_close(&conn->ap2_control_socket);
   debug(2, "Connection %d: UDP control port %u closed.", conn->connection_number,
         conn->local_ap2_control_port);
-  conn->ap2_remote_control_socket_addr_length =
-      0; // indicates to the control receiver thread that the socket address need to be
-         // recreated (needed for resend requests in the realtime mode)
+  conn->remoteControlPeer.clear();
 }
 
 static std::span<const uint8_t> realtimeSessionKey(const SessionState &session) {
@@ -454,10 +439,7 @@ void *rtp_ap2_control_receiver(void *arg) {
         debug(1,"AP2 Control Receiver -- dropping a packet.");
         break;
       case ControlEffectKind::capturePeerIfAbsent:
-        if (conn->ap2_remote_control_socket_addr_length == 0) {
-          memcpy(&conn->ap2_remote_control_socket_addr,&peer,peerLength);
-          conn->ap2_remote_control_socket_addr_length = peerLength;
-        }
+        conn->remoteControlPeer.captureIfAbsent(reinterpret_cast<const sockaddr *>(&peer),peerLength);
         break;
       case ControlEffectKind::unexpectedLatency:
         debug(1,"Stream-specified latency is %d frames. Normally it is 77175.",effect.stream);

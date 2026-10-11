@@ -8,6 +8,16 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <atomic>
+#include "cancellation_wait.hpp"
+
+static CancellationWait cancellation;
+static std::atomic<bool> finishAtObservableCancellation{false};
+extern "C" ssize_t __real_recvfrom(int,void *,size_t,int,sockaddr *,socklen_t *);
+extern "C" ssize_t __wrap_recvfrom(int fd,void *bytes,size_t length,int flags,sockaddr *peer,socklen_t *peerLength) {
+  if (finishAtObservableCancellation.load()) cancellation.block();
+  return __real_recvfrom(fd,bytes,length,flags,peer,peerLength);
+}
 
 TEST(ResendRuntime, NativeControlCaptureAndResendPreserveExactWireAndCleanup) {
   const double fraction = config.diagnostic_drop_packet_fraction;
@@ -44,11 +54,16 @@ TEST(ResendRuntime, NativeControlCaptureAndResendPreserveExactWireAndCleanup) {
     }
     std::this_thread::yield();
   } while (std::chrono::steady_clock::now() < deadline);
+  finishAtObservableCancellation.store(true);
+  EXPECT_EQ(send(client,control.data(),control.size(),0),28);
+  cancellation.waitForBlocked(1);
   EXPECT_EQ(pthread_cancel(worker),0);
   EXPECT_EQ(pthread_join(worker,nullptr),0);
+  finishAtObservableCancellation.store(false);
   close(client);
   config.diagnostic_drop_packet_fraction = fraction;
   ASSERT_TRUE(arrived);
   EXPECT_EQ(request,(std::array<uint8_t,8>{0x80,0xd5,0,1,0xcd,0xef,0x23,0x45}));
   EXPECT_EQ(session.ap2_control_socket,-1);
+  EXPECT_FALSE(session.remoteControlPeer.snapshot());
 }
