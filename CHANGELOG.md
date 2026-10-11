@@ -1,3 +1,9 @@
+## [6.1.13](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.12...v6.1.13) (2026-10-11)
+
+### Bug Fixes
+
+* **ap2:** own event listener lifecycle and stop cooperatively ([#68](https://github.com/gstn-caruso/shairport-sync/issues/68)) ([187b1b3](https://github.com/gstn-caruso/shairport-sync/commit/187b1b3dee93def87fb42eba35fa3f96e4ae9cf8))
+
 ## [6.1.12](https://github.com/gstn-caruso/shairport-sync/compare/v6.1.11...v6.1.12) (2026-10-11)
 
 ### Bug Fixes
