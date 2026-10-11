@@ -529,6 +529,7 @@ double suggested_volume(rtsp_conn_info *conn) {
 
 void player_thread_cleanup_handler(void *arg) {
   rtsp_conn_info *conn = (rtsp_conn_info *)arg;
+  conn->controlChannel.deactivateAndRequestStop();
   // debug(1, "Connection %d: player_thread_cleanup_handler start.", conn->connection_number);
 
   if (config.output->stop) {
@@ -588,7 +589,6 @@ void player_thread_cleanup_handler(void *arg) {
 
   free_audio_buffers(conn);
 
-  conn->rtp_running = 0;
 
   pthread_setcancelstate(oldState, NULL);
   debug(2, "Connection %d: player terminated.", conn->connection_number);

@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <thread>
 #include <atomic>
 
@@ -76,7 +77,7 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
   ASSERT_EQ(bind(descriptor,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
   socklen_t size = sizeof(address);
   ASSERT_EQ(getsockname(descriptor,reinterpret_cast<sockaddr *>(&address),&size),0);
-  session.ap2_control_socket = descriptor;
+  ASSERT_EQ(session.controlChannel.adopt(descriptor),0);
   const int client = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
   ASSERT_GE(client,0);
   ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
@@ -106,7 +107,7 @@ static void runControlPackets(bool includeInvalid,unsigned rate = 44100,bool neg
     EXPECT_EQ(anchor.offset,negativeZero ? 0 : rate == 0 ? -10 : 0);
     EXPECT_EQ(anchor.warned,negativeZero || rate != 0 ? 1 : 0);
   }
-  EXPECT_EQ(session.ap2_control_socket,-1);
+  EXPECT_EQ(fcntl(descriptor,F_GETFD),-1);
   EXPECT_DOUBLE_EQ(readingSession.timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);
   auto later = SessionState::create(timing);
   EXPECT_DOUBLE_EQ(later->timingSettings().offsetSeconds(), negativeZero || rate != 0 ? 0 : -10);

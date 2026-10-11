@@ -79,7 +79,7 @@ TEST_P(RealtimeIngressSockets, AudioAndD6UseExactAuthenticatedBytesAndRejectFail
   ASSERT_EQ(bind(socketFd,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
   socklen_t addressSize = sizeof(address);
   ASSERT_EQ(getsockname(socketFd,reinterpret_cast<sockaddr *>(&address),&addressSize),0);
-  if (control) session.ap2_control_socket = socketFd;
+  if (control) ASSERT_EQ(session.controlChannel.adopt(socketFd),0);
   else session.realtime_audio_socket = socketFd;
   const int client = socket(AF_INET,SOCK_DGRAM | SOCK_CLOEXEC,0);
   ASSERT_GE(client,0);
@@ -117,7 +117,7 @@ TEST_P(RealtimeIngressSockets, AudioAndD6UseExactAuthenticatedBytesAndRejectFail
     EXPECT_EQ(packet.mute,0); EXPECT_EQ(packet.gap,0);
     EXPECT_EQ(packet.bytes,(std::vector<uint8_t>(buffered_block_fixture::plaintext.begin(),buffered_block_fixture::plaintext.end())));
   }
-  EXPECT_EQ(control ? session.ap2_control_socket : session.realtime_audio_socket,-1);
+  if (!control) EXPECT_EQ(session.realtime_audio_socket,-1);
   EXPECT_EQ(fcntl(socketFd,F_GETFD),-1);
 }
 INSTANTIATE_TEST_SUITE_P(Routes,RealtimeIngressSockets,

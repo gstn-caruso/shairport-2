@@ -9,6 +9,7 @@
 #include "timing/shared_rtp_timing_settings.hpp"
 #include "protocol/rtp/resend_coordinator.hpp"
 #include "transport/remote_control_peer.hpp"
+#include "transport/control_datagram_channel.hpp"
 #include "audio/decoding/audio_decoder.hpp"
 #include "audio/format/audio_input_state.hpp"
 #include "audio/resampling/resampler.hpp"
@@ -71,7 +72,7 @@ struct SessionState : PrincipalParticipant {
 
   // RTP stuff
   // only one RTP session can be active at a time.
-  int rtp_running;
+  ControlDatagramChannel controlChannel;
   ResendCoordinator resendCoordinator;
 
   char client_ip_string[INET6_ADDRSTRLEN]; // the ip string of the client
@@ -121,7 +122,6 @@ struct SessionState : PrincipalParticipant {
   int event_socket;
   int data_socket;
   RemoteControlPeer remoteControlPeer;
-  int ap2_control_socket;
   int realtime_audio_socket;
   int buffered_audio_socket;
 

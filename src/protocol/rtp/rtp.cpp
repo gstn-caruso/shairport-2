@@ -138,7 +138,7 @@ void check32conversion(const char *prompt, const uint8_t *source, uint32_t value
 
 void rtp_initialise(rtsp_conn_info *conn) {
   conn->resendCoordinator.reset();
-  conn->rtp_running = 0;
+  conn->controlChannel.deactivate();
   // initialise the timer mutex
   int rc = pthread_mutex_init(&conn->reference_time_mutex, NULL);
   if (rc)
@@ -155,28 +155,25 @@ void rtp_terminate(rtsp_conn_info *conn) {
 
 class NativeResendIo final : public ResendIo {
 public:
-  NativeResendIo(int socket,RemoteControlPeerSnapshot peer) : socket_(socket),peer_(peer) {}
+  NativeResendIo(ControlDatagramChannel::SendLease &lease,RemoteControlPeerSnapshot peer) : lease_(lease),peer_(peer) {}
   uint64_t nowNs() override { return get_absolute_time_in_ns(); }
   double draw() override { return drand48(); }
   ResendSendResult send(std::span<const uint8_t,8> packet) override {
-    const timeval timeout{0,100000};
-    int timeoutError = 0;
-    if (setsockopt(socket_,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout)) < 0) {
-      timeoutError = errno;
+    const int timeoutError = lease_.setResendTimeout();
+    if (timeoutError) {
       debug(1,"Can't set timeout on resend request socket.");
     }
-    const auto count = sendto(socket_,packet.data(),packet.size(),0,
-                             reinterpret_cast<const sockaddr *>(&peer_.address),peer_.length);
-    const int error = count == -1 ? errno : 0;
-    return {count,error,timeoutError};
+    const auto sent = lease_.sendTo(packet,peer_);
+    return {sent.count,sent.errorCode,timeoutError};
   }
 private:
-  int socket_;
+  ControlDatagramChannel::SendLease &lease_;
   RemoteControlPeerSnapshot peer_;
 };
 
 void rtp_request_resend(seq_t first,uint32_t count,rtsp_conn_info *conn) {
-  if (!conn->rtp_running) {
+  auto lease = conn->controlChannel.trySendLease();
+  if (!lease) {
     debug(2,"rtp_request_resend called without active stream!");
     return;
   }
@@ -185,7 +182,7 @@ void rtp_request_resend(seq_t first,uint32_t count,rtsp_conn_info *conn) {
     debug(2,"No remote socket -- skipping the resend");
     return;
   }
-  NativeResendIo io(conn->ap2_control_socket,*peer);
+  NativeResendIo io(lease,*peer);
   const auto outcome = conn->resendCoordinator.request(
       true,true,first,count,config.diagnostic_drop_packet_fraction,io);
   switch (outcome.status) {
@@ -355,7 +352,7 @@ int local_ptp_time_to_frame(uint64_t time, uint32_t *frame, rtsp_conn_info *conn
 void rtp_ap2_control_handler_cleanup_handler(void *arg) {
   rtsp_conn_info *conn = (rtsp_conn_info *)arg;
   debug(2, "Connection %d: AP2 Control Receiver Cleanup.", conn->connection_number);
-  safe_socket_close(&conn->ap2_control_socket);
+  conn->controlChannel.close();
   debug(2, "Connection %d: UDP control port %u closed.", conn->connection_number,
         conn->local_ap2_control_port);
   conn->remoteControlPeer.clear();
@@ -411,11 +408,10 @@ void *rtp_ap2_control_receiver(void *arg) {
   ControlPacketCoordinator coordinator(get_absolute_time_in_ns());
   const std::function<double()> draw = drand48;
   while (true) {
-    SOCKADDR peer{};
-    socklen_t peerLength = sizeof(peer);
-    const auto count = recvfrom(conn->ap2_control_socket,packet,sizeof(packet),0,
-                                reinterpret_cast<sockaddr *>(&peer),&peerLength);
-    const int error = count < 0 ? errno : 0;
+    const auto received = conn->controlChannel.receive(packet);
+    if (received.stopped) break;
+    const auto count = received.count;
+    const int error = received.errorCode;
     const auto now = get_absolute_time_in_ns();
     const ControlLiveSettings live{
         conn->airplay_stream_type == realtime_stream,conn->inputAudio.sampleRate(),
@@ -439,7 +435,7 @@ void *rtp_ap2_control_receiver(void *arg) {
         debug(1,"AP2 Control Receiver -- dropping a packet.");
         break;
       case ControlEffectKind::capturePeerIfAbsent:
-        conn->remoteControlPeer.captureIfAbsent(reinterpret_cast<const sockaddr *>(&peer),peerLength);
+        conn->remoteControlPeer.captureIfAbsent(reinterpret_cast<const sockaddr *>(&received.peer.address),received.peer.length);
         break;
       case ControlEffectKind::unexpectedLatency:
         debug(1,"Stream-specified latency is %d frames. Normally it is 77175.",effect.stream);

@@ -2169,9 +2169,14 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
 
       // bind a new UDP port and get a socket
       conn->local_ap2_control_port = 0; // any port
+      int controlDescriptor = -1;
       err = bind_socket_and_port(SOCK_DGRAM, conn->connection_ip_family, conn->self_ip_string,
                                  conn->self_scope_id, &conn->local_ap2_control_port,
-                                 &conn->ap2_control_socket);
+                                 &controlDescriptor);
+      if (!err) {
+        err = conn->controlChannel.adopt(controlDescriptor);
+        if (err) close(controlDescriptor);
+      }
       if (err) {
         die("Error %d: could not find a UDP port to use as an ap2_control port", err);
       }
@@ -2270,7 +2275,7 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
         activity_monitor_signify_activity(1);
         player_play(conn);
 
-        conn->rtp_running = 1; // hack!
+        conn->controlChannel.activate();
       } break;
       case 103: {
         debug_log_rtsp_message(3, "Buffered Audio Stream SETUP incoming message", req);
@@ -2324,7 +2329,7 @@ void handle_setup_2(rtsp_conn_info *conn, RtspMessage *req, RtspMessage *resp) {
         // call in the SETRATEANCHORI handler, which should come up right away
         activity_monitor_signify_activity(0);
         player_play(conn);
-        conn->rtp_running = 1; // hack!
+        conn->controlChannel.activate();
       } break;
       case 130: {
         debug(1, "Remote Control Setup Received on a PTP connection.");
