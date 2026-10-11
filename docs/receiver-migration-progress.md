@@ -1033,6 +1033,65 @@ release automation). Broader pairing/handshake ownership, live Home/device
 acceptance, other worker cancellation, and performance measurements remain
 open. No installation or running service was changed.
 
+The pairing session slice applies Feature Envy (#77), God Service (#78), and
+Long Method (#82). `PairingSession` privately owns native setup/verify contexts,
+the setup context's borrowed result, and control/event/data encrypted channels.
+It returns owned reply bytes, status, body-presence information, and typed
+diagnostics. RTSP keeps client-name/log formatting and response headers, while
+the owner handles lazy creation, native processing, secret-dependent channel
+preparation, and release ordering. No raw setup result or context is exposed by
+SessionState; the obsolete pairing aggregate and unused salt field are removed.
+
+`PairingOptions` copies device ID and optional password from the application's
+immutable network settings. Its required shared immutable owner is passed through
+listener capture and the value-initializing SessionState factory. Default
+SessionState construction remains defaulted; its unconfigured pairing owner
+returns an explicit 500 outcome. Null factory/listener dependencies are rejected.
+Actual accepted sessions receive the exact options owner and retain it after
+listener stop. Existing raw-field zero/null initialization remains tested.
+
+The original native handlers were characterized before extraction: malformed
+operations return 470, injected context creation failure returns 500, and a
+legitimate transient client/server exchange returns the setup TLVs with
+Content-Type while leaving encrypted responses inactive. The seeded remote
+SETUP regression demonstrated null setup-result access under UBSan
+(`/tmp/pairing-session-data-red.log`). The separate safety fix requires a
+completed setup secret. The owned preparation API now reports noSetupSecret
+without opening a data port; RTSP retains its 200 response and zero port.
+
+Standalone fixtures use real HomeKit transient and correct-PIN client/server
+exchanges and legitimate verification. Verification retains the existing null
+lookup callback policy and does not prepare or activate transport channels.
+Transient completion prepares control3 before event4 with empty salts; failures
+retain the legacy successful setup body/status and partial control state.
+Data5 uses the decimal numeric seed and interoperates with native client2.
+Failed data-cipher creation leaves control/event channels usable. Reply bytes
+outlive release, repeated calls reuse contexts, and release clears the borrowed
+result and channels before freeing contexts.
+
+The existing actual encrypted event-read destruction fixture now also observes
+setup/verify contexts freed once only after callback completion and accepted-fd
+closure. It uses cooperative interruption without a cancellation workaround.
+The separate legacy cancellation test retains its documented TSan-only seam;
+that result is not evidence of native cancellation unwind correctness.
+
+The baseline passed 683 Release tests. Final verification passed 695 full
+Release tests and 49 cases in each ASan+UBSan and TSan profile, using the regex
+`PairingSession|PairingAdapter|SessionTiming|RtspListener|EventCommandRuntime|EventPortRuntime|RequestSocket|rtsp-message-c`.
+Logs are `/tmp/pairing-session-final-{release,asan,tsan}.log`; original handler
+characterization and owner-boundary red/green logs are also retained under
+`/tmp/pairing-session-*`. Independent linkage and actual instrumented compile
+commands are recorded in `/tmp/pairing-session-linkage.log` and
+`/tmp/pairing-session-{asan,tsan}-instrumentation.log`. The target depends on the
+owned encrypted channel and native pairing libraries, without receiver, media,
+configuration, or backend services.
+
+The seeded-SETUP safety fix requires an automated patch release, expected
+v6.1.16. Native pairing algorithms, verification authorization policy, and
+persistence are unchanged. Broader bundled C cleanup, live Home/re-pairing
+acceptance, other worker lifecycles, and performance measurements remain open.
+No installation or service restart was performed.
+
 ## Release and installed validation
 
 Release automation produced **v6.0.0**, the expected major change for removing
