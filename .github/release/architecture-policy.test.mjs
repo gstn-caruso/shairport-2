@@ -7,11 +7,11 @@ const workflow = yaml.load(readFileSync(new URL('../workflows/receiver.yml', imp
 
 test('CI retains exactly three build configurations on AMD64 only', () => {
   const matrix = workflow.jobs.reference.strategy.matrix;
-  assert.deepEqual(matrix.platform, [{architecture: 'amd64', runner: 'ubuntu-latest'}]);
+  assert.deepEqual(matrix.platform, [{architecture: 'amd64', runner: 'ubuntu-24.04'}]);
   assert.deepEqual(matrix.build, ['Release', 'ASan-UBSan', 'TSan']);
 });
 
 test('publication downloads only the tested AMD64 package', () => {
-  const downloads = workflow.jobs.release.steps.filter(step => step.uses === 'actions/download-artifact@v4');
+  const downloads = workflow.jobs.release.steps.filter(step => step.uses?.startsWith('actions/download-artifact@'));
   assert.deepEqual(downloads.map(step => step.with.name), ['deb-ubuntu-26.04-amd64-${{ github.sha }}']);
 });

@@ -28,7 +28,7 @@ runs:
         curl -fsSL "https://github.com/asdf-vm/asdf/releases/download/v0.20.0/asdf-v0.20.0-linux-$ASDF_ARCH.tar.gz" -o /tmp/asdf.tar.gz
         tar -xzf /tmp/asdf.tar.gz -C /usr/local/bin asdf
     - name: Restore pinned compiler cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       id: llvm-cache
       with:
         path: /opt/asdf/installs/clang/23.1.3
