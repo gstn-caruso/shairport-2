@@ -298,7 +298,7 @@ int get_ptp_anchor_local_time_info(rtsp_conn_info *conn, uint32_t *anchorRTP,
       case clock_version_mismatch:
         debug(2, "Connection %d: NQPTP clock interface mismatch.", conn->connection_number);
         warn(
-            "This version of Shairport Sync is not compatible with the installed version of NQPTP. "
+            "This version of shairport-2 is not compatible with the installed version of NQPTP. "
             "Please update.");
         break;
       case clock_not_synchronised:

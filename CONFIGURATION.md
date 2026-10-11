@@ -5,13 +5,17 @@ Version 6.1.0 bundled the timing companion. Stop an older standalone timing
 service before activating it and restart the receiver after a companion restart;
 see [timing migration](BUILD.md#migrating-a-separately-installed-nqptp).
 Both applications share one version; [CHANGELOG.md](CHANGELOG.md) records releases.
+For the rename from `shairport-sync` to `shairport-2`, follow the
+[program migration guide](BUILD.md#migrating-from-shairport-sync) before
+activating the new services. The previous default configuration is not loaded
+automatically.
 
 ## Foreground operation
 
 The operational interface accepts only no arguments, `--config PATH`,
 `--version`, and `--check-config [--config PATH]`. Version reporting and
 configuration validation work without running PulseAudio, Avahi or NQPTP.
-No arguments use `shairport-sync.conf` in the installation configuration
+No arguments use `shairport-2.conf` in the installation configuration
 directory (`/etc` in Debian packages); an absent default file uses built-in
 defaults. Explicit missing or unreadable files fail. Invalid arguments exit 2;
 configuration or startup failures exit 1.
@@ -41,7 +45,7 @@ Legacy setting flags are removed. Move supported settings to libconfig:
 
 Use `--config PATH` instead of `-c` or `--configfile`; `--version` replaces `-V`.
 Daemon/PID/control, backend-selection and syslog flags are unsupported. Use
-`journalctl --user -u shairport-sync` for diagnostics.
+`journalctl --user -u shairport-2` for diagnostics.
 
 ## Build stack
 
@@ -55,18 +59,18 @@ Runtime backend selection (`--output`, `--mdns`, `general.output_backend`, `gene
 
 ## Troubleshooting
 
-Check `shairport-sync --version` and validate the effective configuration with
-`shairport-sync --check-config --config /etc/shairport-sync.conf`. Both commands
+Check `shairport-2 --version` and validate the effective configuration with
+`shairport-2 --check-config --config /etc/shairport-2.conf`. Both commands
 work without audio, discovery or timing services. Inspect receiver logs with
-`journalctl --user -u shairport-sync`; increase `diagnostics.log_verbosity` and
+`journalctl --user -u shairport-2`; increase `diagnostics.log_verbosity` and
 optionally enable `diagnostics.statistics` for playback problems.
 
 | Symptom | Checks |
 | --- | --- |
-| Startup fails before discovery | Check `sudo systemctl status shairport-sync-nqptp`, its journal, readable shared memory and matching SMI10. Follow the timing migration guide for port conflicts or stale shared memory. |
+| Startup fails before discovery | Check `sudo systemctl status shairport-2-nqptp`, its journal, readable shared memory and matching SMI10. Follow the timing migration guide for port conflicts or stale shared memory. |
 | Receiver is absent from the picker | Check Avahi, Bonjour multicast filtering and network isolation. The RTSP port defaults to TCP 7000; negotiated session UDP ports start at 6001 by default. |
 | Connected but silent | Run `pactl info` and `pactl list short sinks` in the audio user's session; check server, sink, volume and `pipewire-pulse` availability. |
-| Configuration rejected | Compare with `scripts/shairport-sync.conf`. Removed options and even empty legacy backend groups are errors. |
+| Configuration rejected | Compare with `scripts/shairport-2.conf`. Removed options and even empty legacy backend groups are errors. |
 | Dropouts or timing problems | Enable diagnostics and inspect packet loss, clock availability and output latency. |
 
 ### Home and pairing

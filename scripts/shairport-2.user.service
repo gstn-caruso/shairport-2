@@ -1,10 +1,10 @@
 [Unit]
-Description=Shairport Sync AirPlay 2 receiver (PulseAudio)
+Description=shairport-2 AirPlay 2 receiver (PulseAudio)
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/shairport-sync
+ExecStart=/usr/local/bin/shairport-2
 Restart=on-failure
 RestartSec=3
 

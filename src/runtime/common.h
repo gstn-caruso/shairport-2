@@ -86,17 +86,17 @@ typedef struct {
   config_t *cfg;
   int endianness;
   double default_airplay_volume;
-  char *appName; // normally the app is called shairport-syn, but it may be symlinked
+  char *appName; // normally the app is called shairport-2, but it may be symlinked
   char *password;
-  char *service_name; // the name for the shairport service, e.g. "Shairport Sync Version %v running
+  char *service_name; // the name for the shairport service, e.g. "shairport-2 Version %v running
                       // on host %h"
 
-  char *pa_server;           // the pulseaudio server address that Shairport Sync will play on.
-  char *pa_application_name; // the name under which Shairport Sync shows up as an "Application" in
+  char *pa_server;           // the pulseaudio server address that shairport-2 will play on.
+  char *pa_application_name; // the name under which shairport-2 shows up as an "Application" in
                              // the Sound Preferences in most desktop Linuxes.
-  // Defaults to "Shairport Sync". Shairport Sync must be playing to see it.
+  // Defaults to "shairport-2". shairport-2 must be playing to see it.
 
-  char *pa_sink; // the name (or id) of the sink that Shairport Sync will play on.
+  char *pa_sink; // the name (or id) of the sink that shairport-2 will play on.
 
 
 

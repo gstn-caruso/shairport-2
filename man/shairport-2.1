@@ -1,18 +1,18 @@
-.TH SHAIRPORT-SYNC 1
+.TH SHAIRPORT-2 1
 .SH NAME
-shairport-sync \- AirPlay 2 receiver for Linux with PulseAudio
+shairport-2 \- AirPlay 2 receiver for Linux with PulseAudio
 .SH SYNOPSIS
-.B shairport-sync
+.B shairport-2
 .RI [ --config " PATH" ]
 .br
-.B shairport-sync --version
+.B shairport-2 --version
 .br
-.B shairport-sync --check-config
+.B shairport-2 --check-config
 .RI [ --config " PATH" ]
 .SH DESCRIPTION
 Receives realtime and buffered AirPlay 2 audio. PulseAudio, Avahi, OpenSSL,
 FFmpeg and compatible timing shared memory are required. The package includes
-shairport-sync-nqptp (SMI10), built at the receiver's release version.
+shairport-2-nqptp (SMI10), built at the receiver's release version.
 Missing or incompatible timing shared memory causes
 startup to fail before listening or advertising. No AirPlay 1 fallback is provided.
 PipeWire can be used through its PulseAudio-compatible server.
@@ -29,15 +29,15 @@ Validate effective settings without starting network or audio services.
 Version reporting and configuration checking work without running PulseAudio,
 Avahi or NQPTP. Invalid arguments exit 2; configuration or startup errors exit 1.
 .SH CONFIGURATION
-See shairport-sync.conf.sample for PulseAudio server and sink, volume,
+See shairport-2.conf.sample for PulseAudio server and sink, volume,
 channel mapping, network interface, UDP ports and synchronisation settings.
 Removed backend, service selection, DSP and metadata-export settings are errors.
-Without --config, use shairport-sync.conf in the installation configuration
+Without --config, use shairport-2.conf in the installation configuration
 directory (/etc in Debian packages). An absent default file uses built-in
 defaults. Legacy setting flags are removed. Restart after configuration changes.
 .SH SERVICE
 Run as a systemd user service belonging to the PulseAudio session owner.
-The bundled shairport-sync-nqptp companion and Avahi run as system services.
+The bundled shairport-2-nqptp companion and Avahi run as system services.
 Start the companion first; restart the receiver after companion restart to
 remap shared memory. No system account or alternate init installer
 is provided.

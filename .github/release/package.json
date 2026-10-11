@@ -1,5 +1,5 @@
 {
-  "name": "shairport-sync-release",
+  "name": "shairport-2-release",
   "private": true,
   "type": "module",
   "scripts": {"test": "node --test"},

@@ -478,7 +478,7 @@ static int init(__attribute__((unused)) int argc, __attribute__((unused)) char *
   if (config.pa_application_name)
     context = pa_context_new(mainloop_api, config.pa_application_name);
   else
-    context = pa_context_new(mainloop_api, "Shairport Sync");
+    context = pa_context_new(mainloop_api, "shairport-2");
   if (context == NULL)
     die("could not create a new context for pulseaudio.");
   // Set a callback so we can wait for the context to be ready

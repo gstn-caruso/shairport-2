@@ -148,7 +148,7 @@ public:
   explicit ConfigurationReader(const ConfigurationEnvironment &input)
       : environment(input), config_file_stuff(settings.parsed_->tree) {}
   ReceiverSettings read(const StartupOptions &options) {
-    config.appName = copyText("shairport-sync");
+    config.appName = copyText("shairport-2");
     config.configfile = copyText(options.configurationPath().value_or(environment.defaultPath));
     if (options.configurationPath() && access(config.configfile, R_OK) != 0)
       rejectConfiguration("Unable to read configuration %s: %s", config.configfile, strerror(errno));
@@ -1046,7 +1046,7 @@ config.firmware_version = copyText(environment.firmwareVersion);
       /* Get the diagnostics output default. */
       if (config_lookup_string(config.cfg, "diagnostics.log_output_to", &str)) {
 
-        recordWarning("the diagnostic \"log_output_to\" setting is obsolete and is ignored. All logging is to STDERR, which is directed to the system log when Shairport Sync is running as a service.");
+        recordWarning("the diagnostic \"log_output_to\" setting is obsolete and is ignored. All logging is to STDERR, which is directed to the system log when shairport-2 is running as a service.");
       }
 
 

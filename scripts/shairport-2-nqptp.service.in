@@ -1,11 +1,11 @@
 [Unit]
-Description=Shairport Sync NQPTP timing companion
+Description=shairport-2 NQPTP timing companion
 Wants=network-online.target
 After=network.target network-online.target
 
 [Service]
 Type=simple
-ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/shairport-sync-nqptp
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/shairport-2-nqptp
 DynamicUser=yes
 LimitRTPRIO=6
 AmbientCapabilities=CAP_NET_BIND_SERVICE

@@ -1,5 +1,5 @@
 name: Issue Report
-description: Questions about installing or configuring Shairport Sync? Please check through Issues (including closed issues) or create a new Issue here.
+description: Questions about installing or configuring shairport-2? Please check through Issues (including closed issues) or create a new Issue here.
 title: "[Problem]: "
 labels: ["new issue"]
 body:
@@ -31,7 +31,7 @@ body:
     id: version
     attributes:
       label: Configuration Information.
-      description: Please include `uname -a`, `shairport-sync --version`, configuration validation with `shairport-sync --check-config`, and relevant `journalctl --user -u shairport-sync` output. Remove private configuration values before sharing.
+      description: Please include `uname -a`, `shairport-2 --version`, configuration validation with `shairport-2 --check-config`, and relevant `journalctl --user -u shairport-2` output. Remove private configuration values before sharing.
       render: shell
     validations:
       required: true
@@ -45,7 +45,7 @@ body:
   - type: dropdown
     id: install
     attributes:
-      label: How did you install Shairport Sync?
+      label: How did you install shairport-2?
       options:
         - A Linux package manager
         - Built from source

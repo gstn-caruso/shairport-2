@@ -6,4 +6,4 @@ target_include_directories(receiver-configuration PUBLIC "${CMAKE_SOURCE_DIR}/sr
 target_compile_options(receiver-configuration PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
 target_link_libraries(receiver-configuration PUBLIC PkgConfig::LIBCONFIG PkgConfig::AVUTIL receiver-text receiver-audio-format)
 target_link_libraries(receiver PUBLIC receiver-configuration)
-target_sources(shairport-sync PRIVATE main.cpp)
+target_sources(shairport-2 PRIVATE main.cpp)
