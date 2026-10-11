@@ -54,7 +54,10 @@
 #include "platform/utilities/structured_buffer.h"
 #include "platform/utilities/ffmpeg_api.h"
 #include <span>
+#include <functional>
+#include <limits>
 import receiver.protocol.ap2.realtime_audio;
+import receiver.protocol.ap2.control_packet;
 
 
 
@@ -410,161 +413,98 @@ void decipher_player_put_packet(uint8_t *packet, ssize_t count, rtsp_conn_info *
   else submitRealtimeAudio(*audio,*conn);
 }
 
+static double controlStreamSeconds(int32_t stream,unsigned rate) {
+  const auto frames = static_cast<int64_t>(stream)+11025;
+  if (rate != 0) return frames*1.0/rate;
+  if (frames == 0) return std::numeric_limits<double>::quiet_NaN();
+  return frames < 0 ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
+}
 void *rtp_ap2_control_receiver(void *arg) {
-  const int32_t ap2_realttime_stream_latency_fudge_factor = 11025; // seems to bring everything into sync
-  //  #include <syscall.h>
-  //  debug(1, "rtp_ap2_control_receiver PID %d", syscall(SYS_gettid));
-  pthread_cleanup_push(rtp_ap2_control_handler_cleanup_handler, arg);
-  rtsp_conn_info *conn = (rtsp_conn_info *)arg;
+  pthread_cleanup_push(rtp_ap2_control_handler_cleanup_handler,arg);
+  auto *conn = static_cast<rtsp_conn_info *>(arg);
   uint8_t packet[4096];
-  ssize_t nread;
-  int keep_going = 1;
-  uint64_t start_time = get_absolute_time_in_ns();
-  uint64_t packet_number = 0;
-  while (keep_going) {
-    SOCKADDR from_sock_addr;
-    socklen_t from_sock_addr_length = sizeof(SOCKADDR);
-    memset(&from_sock_addr, 0, sizeof(SOCKADDR));
-
-    nread = recvfrom(conn->ap2_control_socket, packet, sizeof(packet), 0,
-                     (struct sockaddr *)&from_sock_addr, &from_sock_addr_length);
-    uint64_t time_now = get_absolute_time_in_ns();
-    int64_t time_since_start = time_now - start_time;
-
-    if (conn->udp_clock_is_initialised == 0) {
-      packet_number = 0;
-      conn->udp_clock_is_initialised = 1;
-      debug(2, "AP2 Realtime Clock receiver initialised.");
-    }
-
-    // debug(1,"Connection %d: AP2 Control Packet received.", conn->connection_number);
-
-    if (nread >= 28) { // must have at least 28 bytes for the timing information
-      if ((time_since_start < 2000000) && ((packet[0] & 0x10) == 0)) {
-        debug(1,
-              "Dropping what looks like a (non-sentinel) packet left over from a previous session "
-              "at %f ms.",
-              0.000001 * time_since_start);
-      } else {
-        packet_number++;
-        // debug(1,"AP2 Packet %" PRIu64 ".", packet_number);
-
-        if (packet_number == 1) {
-          if ((packet[0] & 0x10) != 0) {
-            debug(2, "First packet is a sentinel packet.");
-          } else {
-            debug(2, "First packet is a not a sentinel packet!");
-          }
+  ControlPacketCoordinator coordinator(get_absolute_time_in_ns());
+  const std::function<double()> draw = drand48;
+  while (true) {
+    SOCKADDR peer{};
+    socklen_t peerLength = sizeof(peer);
+    const auto count = recvfrom(conn->ap2_control_socket,packet,sizeof(packet),0,
+                                reinterpret_cast<sockaddr *>(&peer),&peerLength);
+    const int error = count < 0 ? errno : 0;
+    const auto now = get_absolute_time_in_ns();
+    const ControlLiveSettings live{
+        conn->airplay_stream_type == realtime_stream,conn->inputAudio.sampleRate(),
+        config.audio_backend_buffer_desired_length,config.audio_backend_latency_offset,
+        conn->latency_warning_issued != 0,config.diagnostic_drop_packet_fraction};
+    const auto decision = coordinator.handle(
+        {std::span<const uint8_t>(packet,count < 0 ? 0 : static_cast<size_t>(count)),error,now},live,draw);
+    for (const auto &effect : decision) {
+      switch (effect.kind) {
+      case ControlEffectKind::initialized:
+        debug(2,"AP2 Realtime Clock receiver initialised.");
+        break;
+      case ControlEffectKind::stale:
+        debug(1,"Dropping what looks like a (non-sentinel) packet left over from a previous session at %f ms.",
+              0.000001*effect.elapsedNs);
+        break;
+      case ControlEffectKind::firstSentinel:
+        debug(2,effect.sentinel ? "First packet is a sentinel packet." : "First packet is a not a sentinel packet!");
+        break;
+      case ControlEffectKind::diagnosticDrop:
+        debug(1,"AP2 Control Receiver -- dropping a packet.");
+        break;
+      case ControlEffectKind::capturePeerIfAbsent:
+        if (conn->ap2_remote_control_socket_addr_length == 0) {
+          memcpy(&conn->ap2_remote_control_socket_addr,&peer,peerLength);
+          conn->ap2_remote_control_socket_addr_length = peerLength;
         }
-        // debug(1,"rtp_ap2_control_receiver coded: %u, %u", packet[0], packet[1]);
-        // you might want to set this higher to specify how many initial timings to ignore
-        if (packet_number >= 1) {
-          if ((config.diagnostic_drop_packet_fraction == 0.0) ||
-              (drand48() > config.diagnostic_drop_packet_fraction)) {
-            // store the from_sock_addr if we haven't already done so
-            // v remember to zero this when you're finished!
-            if (conn->ap2_remote_control_socket_addr_length == 0) {
-              memcpy(&conn->ap2_remote_control_socket_addr, &from_sock_addr, from_sock_addr_length);
-              conn->ap2_remote_control_socket_addr_length = from_sock_addr_length;
-            }
-            switch (packet[1]) {
-            case 215: // code 215, effectively an anchoring announcement
-            {
-              uint64_t remote_packet_time_ns = nctoh64(packet + 8);
-              check64conversion("remote_packet_time_ns", packet + 8, remote_packet_time_ns);
-              uint64_t clock_id = nctoh64(packet + 20);
-              check64conversion("clock_id", packet + 20, clock_id);
-
-              // debug(1, "we have clock_id: %" PRIx64 ".", clock_id);
-              // debug(1,"remote_packet_time_ns: %" PRIx64 ", local_realtime_now_ns: %" PRIx64
-              // ".", remote_packet_time_ns, local_realtime_now);
-              uint32_t frame_1 =
-                  nctohl(packet + 4); // this seems to be the frame with latency of 77175 included
-              check32conversion("frame_1", packet + 4, frame_1);
-              uint32_t frame_2 =
-                  nctohl(packet + 16); // this seems to be the frame the time refers to
-              check32conversion("frame_2", packet + 16, frame_2);
-              // this updates the anchor information contained in the packet
-              int32_t stream_specified_latency = frame_2 - frame_1; // this is the latency expected
-              if (stream_specified_latency != 77175)
-                debug(1, "Stream-specified latency is %d frames. Normally it is 77175.", stream_specified_latency);
-              int32_t net_source_latency = stream_specified_latency + ap2_realttime_stream_latency_fudge_factor;
-
-              // Now to accommodate a backend buffer of the desired length.
-              // Note that it's in input-rate frames, not output-rate frames!
-
-              net_source_latency = net_source_latency - (int32_t)(config.audio_backend_buffer_desired_length *
-                                                    conn->inputAudio.sampleRate());
-
-              // Now we want to check the user-specified latency offset.
-
-              // We want to warn the user if they have asked for a negative latency that is too great --
-              // one that would require packets to arrive before they actually do,
-              // (which is about two seconds before they are to be played).
-
-              int32_t net_latency = net_source_latency + (int32_t)(config.audio_backend_latency_offset * conn->inputAudio.sampleRate());
-
-              if (net_latency <= 0) {
-                if (conn->latency_warning_issued == 0) {
-                  warn("The stream latency (%g seconds) is too short to accommodate an audio backend latency offset of "
-                       "%g seconds and a backend buffer of %g seconds. The audio_backend_latency_offset has been set to zero.",
-                       ((stream_specified_latency + ap2_realttime_stream_latency_fudge_factor) * 1.0) / conn->inputAudio.sampleRate(),
-                       config.audio_backend_latency_offset,
-                       config.audio_backend_buffer_desired_length);
-                  config.audio_backend_latency_offset = 0.0;
-                  net_latency = net_source_latency;
-                  conn->latency_warning_issued = 1;
-                }
-              }
-              conn->latency = net_latency; // this is the time window within which packets can be accepted without being too late
-              set_ptp_anchor_info(conn, clock_id, frame_1 - ap2_realttime_stream_latency_fudge_factor, remote_packet_time_ns);
-
-            } break;
-            case 0xd6:
-              // six bytes in is the sequence number at the start of the encrypted audio packet
-              decipher_player_put_packet(packet + 6, nread - 6, conn);
-              break;
-            default: {
-              char *packet_in_hex_cstring =
-                  debug_malloc_hex_cstring(packet, nread); // remember to free this afterwards
-              debug(1,
-                    "AP2 Control Receiver Packet of first byte 0x%02X, type 0x%02X length %zd "
-                    "received: "
-                    "\"%s\".",
-                    packet[0], packet[1], nread, packet_in_hex_cstring);
-              free(packet_in_hex_cstring);
-            } break;
-            }
-          } else {
-            debug(1, "AP2 Control Receiver -- dropping a packet.");
-          }
-        }
+        break;
+      case ControlEffectKind::unexpectedLatency:
+        debug(1,"Stream-specified latency is %d frames. Normally it is 77175.",effect.stream);
+        break;
+      case ControlEffectKind::warnAndZeroSharedOffset:
+        warn("The stream latency (%g seconds) is too short to accommodate an audio backend latency offset of "
+             "%g seconds and a backend buffer of %g seconds. The audio_backend_latency_offset has been set to zero.",
+             controlStreamSeconds(effect.stream,live.inputRate),
+             live.sharedOffsetSeconds,live.backendBufferSeconds);
+        config.audio_backend_latency_offset = 0;
+        conn->latency_warning_issued = 1;
+        break;
+      case ControlEffectKind::setLatency:
+        conn->latency = static_cast<uint32_t>(effect.latency);
+        break;
+      case ControlEffectKind::setAnchor:
+        set_ptp_anchor_info(conn,effect.clockId,effect.anchorFrame,effect.timeNs);
+        break;
+      case ControlEffectKind::retransmit:
+        decipher_player_put_packet(const_cast<uint8_t *>(effect.bytes.data()),effect.bytes.size(),conn);
+        break;
+      case ControlEffectKind::unknown: {
+        char *hex = debug_malloc_hex_cstring(const_cast<uint8_t *>(effect.bytes.data()),effect.bytes.size());
+        debug(1,"AP2 Control Receiver Packet of first byte 0x%02X, type 0x%02X length %zd received: \"%s\".",
+              effect.bytes[0],effect.bytes[1],static_cast<ssize_t>(effect.bytes.size()),hex);
+        free(hex);
+        break;
       }
-    } else {
-      if (nread == -1) {
-        if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-          if (conn->airplay_stream_type == realtime_stream) {
-            debug(1,
-                  "Connection %d: no control packets for the last 7 seconds -- resetting anchor "
-                  "info",
-                  conn->connection_number);
-            reset_ptp_anchor_info(conn);
-            packet_number = 0; // start over in allowing the packet to set anchor information
-          }
-        } else {
-          debug(2, "Connection %d: AP2 Control Receiver -- error %d receiving a packet.",
-                conn->connection_number, errno);
-        }
-      } else {
-        debug(2, "Connection %d: AP2 Control Receiver -- malformed packet, %zd bytes long.",
-              conn->connection_number, nread);
+      case ControlEffectKind::resetAnchor:
+        debug(1,"Connection %d: no control packets for the last 7 seconds -- resetting anchor info",conn->connection_number);
+        reset_ptp_anchor_info(conn);
+        break;
+      case ControlEffectKind::error:
+        debug(2,"Connection %d: AP2 Control Receiver -- error %d receiving a packet.",conn->connection_number,effect.errorCode);
+        break;
+      case ControlEffectKind::malformed:
+        debug(2,"Connection %d: AP2 Control Receiver -- malformed packet, %zd bytes long.",
+              conn->connection_number,static_cast<ssize_t>(effect.length));
+        break;
+      case ControlEffectKind::invalidLatency:
+        debug(1,"Invalid AP2 control latency -- timing packet ignored.");
+        break;
       }
     }
   }
-  debug(1, "AP2 Control RTP thread \"normal\" exit -- this can't happen. Hah!");
   pthread_cleanup_pop(1);
-  debug(1, "AP2 Control RTP thread exit.");
-  pthread_exit(NULL);
+  pthread_exit(nullptr);
 }
 
 void rtp_realtime_audio_cleanup_handler(__attribute__((unused)) void *arg) {
