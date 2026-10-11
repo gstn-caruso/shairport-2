@@ -7,3 +7,7 @@ target_include_directories(receiver-buffered-tcp PUBLIC "${CMAKE_SOURCE_DIR}/src
 target_compile_options(receiver-buffered-tcp PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
 target_link_libraries(receiver-buffered-tcp PUBLIC receiver-byte-queue Threads::Threads)
 target_link_libraries(receiver PUBLIC receiver-buffered-tcp)
+add_library(receiver-remote-control-peer STATIC remote_control_peer.cpp)
+target_include_directories(receiver-remote-control-peer PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(receiver-remote-control-peer PUBLIC Threads::Threads)
+target_link_libraries(receiver PUBLIC receiver-remote-control-peer)
