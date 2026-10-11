@@ -2979,6 +2979,8 @@ decrypt(uint8_t **plaintext, size_t *plaintext_len, const uint8_t *ciphertext, s
 	  cctx->errmsg = "Decryption with chacha poly1305 failed";
 	  cctx->decryption_counter = cctx->decryption_counter_prev;
 	  free(*plaintext);
+	  *plaintext = NULL;
+	  *plaintext_len = 0;
 	  return -1;
 	}
 
