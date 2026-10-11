@@ -21,5 +21,6 @@ target_link_libraries(receiver-event-port-worker PUBLIC receiver-event-command T
 target_link_libraries(receiver PUBLIC receiver-event-port-worker)
 add_library(receiver-encrypted-channel STATIC encrypted_channel.cpp)
 target_include_directories(receiver-encrypted-channel PUBLIC "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src")
+target_compile_options(receiver-encrypted-channel PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
 target_link_libraries(receiver-encrypted-channel PUBLIC pair_ap Threads::Threads)
 target_link_libraries(receiver PUBLIC receiver-encrypted-channel)

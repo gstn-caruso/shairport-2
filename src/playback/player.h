@@ -37,33 +37,6 @@ typedef uint16_t seq_t;
 
 typedef enum { realtime_stream, buffered_stream } airplay_stream_t;
 
-typedef struct {
-  uint8_t *data;
-  size_t length;
-  size_t size;
-} sized_buffer;
-
-typedef struct pair_cipher_bundle {
-  struct pair_cipher_context *cipher_ctx;
-  sized_buffer encrypted_read_buffer;
-  sized_buffer plaintext_read_buffer;
-  int is_encrypted;
-  char *description;
-#ifdef __cplusplus
-  void release();
-#endif
-} pair_cipher_bundle; // cipher context and buffers
-
-typedef struct {
-  struct pair_setup_context *setup_ctx;
-  struct pair_verify_context *verify_ctx;
-  pair_cipher_bundle control_cipher_bundle;
-  pair_cipher_bundle event_cipher_bundle;
-  pair_cipher_bundle data_cipher_bundle;
-  char *data_cipher_salt;
-} ap2_pairing;
-
-
 #ifdef __cplusplus
 struct SessionState;
 using rtsp_conn_info = SessionState;

@@ -1,5 +1,5 @@
 #include "protocol/ap2/native_event_channel.hpp"
-#include "protocol/rtsp/rtsp.h"
+#include "protocol/ap2/native_encrypted_channel.hpp"
 #include <pthread.h>
 #include <unistd.h>
 #include <utility>
@@ -25,7 +25,7 @@ private:
 };
 class NativeEventChannel final : public EventPlaintextChannel {
 public:
-  NativeEventChannel(AcceptedEventDescriptor fd,pair_cipher_bundle &cipher)
+  NativeEventChannel(AcceptedEventDescriptor fd,EncryptedChannel &cipher)
       : fd_(std::move(fd)),cipher_(cipher) {}
   std::ptrdiff_t write(std::span<const uint8_t> bytes) override {
     return write_encrypted(fd_.fd(),&cipher_,bytes.data(),bytes.size());
@@ -35,9 +35,9 @@ public:
   }
 private:
   AcceptedEventDescriptor fd_;
-  pair_cipher_bundle &cipher_;
+  EncryptedChannel &cipher_;
 };
-std::unique_ptr<EventPlaintextChannel> makeNativeEventChannel(int fd,pair_cipher_bundle &cipher) {
+std::unique_ptr<EventPlaintextChannel> makeNativeEventChannel(int fd,EncryptedChannel &cipher) {
   if (fd < 0) throw std::invalid_argument("Event channel requires an accepted descriptor");
   AcceptedEventDescriptor accepted(fd);
   return std::make_unique<NativeEventChannel>(std::move(accepted),cipher);
@@ -51,7 +51,7 @@ private:
   AcceptedEventDescriptor fd_;
 };
 
-std::expected<AcceptedEventChannel,int> makeInterruptibleNativeEventChannel(int fd,pair_cipher_bundle &cipher) {
+std::expected<AcceptedEventChannel,int> makeInterruptibleNativeEventChannel(int fd,EncryptedChannel &cipher) {
   AcceptedEventDescriptor accepted(fd);
   const int duplicate = fcntl(fd,F_DUPFD_CLOEXEC,0);
   if (duplicate < 0) return std::unexpected(errno);
