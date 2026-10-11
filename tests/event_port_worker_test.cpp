@@ -117,3 +117,38 @@ TEST(EventPortWorker, StartupConsumesInvalidOrUnlistenableDescriptorOnFailure) {
   EXPECT_EQ(fcntl(fd,F_GETFD),-1);
   EXPECT_EQ(worker.stop(),0);
 }
+
+TEST(EventPortWorker, StopDuringFactoryRegistrationInterruptsAndRejectsLateChannel) {
+  BoundEventListener listener;
+  EventCommandExchange exchange; EventPortWorker worker;
+  auto state = std::make_shared<EventIoState>();
+  std::promise<void> entered,release;
+  auto reached = entered.get_future(); auto proceed = release.get_future();
+  ASSERT_TRUE(worker.start(std::exchange(listener.fd,-1),exchange,
+      [&](int fd)->std::expected<AcceptedEventChannel,int> {
+        entered.set_value(); proceed.wait(); return testFactory(state)(fd);
+      },[&]{ ++state->initial; }));
+  const int client = socket(AF_INET,SOCK_STREAM,0);
+  ASSERT_EQ(connect(client,reinterpret_cast<sockaddr *>(&listener.address),sizeof(listener.address)),0);
+  ASSERT_EQ(reached.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  auto stopping = std::async(std::launch::async,[&]{ return worker.stop(); });
+  EXPECT_EQ(stopping.wait_for(std::chrono::milliseconds(30)),std::future_status::timeout);
+  release.set_value();
+  ASSERT_EQ(stopping.wait_for(std::chrono::seconds(1)),std::future_status::ready);
+  EXPECT_EQ(stopping.get(),0); EXPECT_TRUE(state->interrupted);
+  EXPECT_EQ(state->initial.load(),0u); EXPECT_EQ(state->closed.load(),1u);
+  close(client);
+}
+
+TEST(EventPortWorker, ConcurrentStopsJoinOnceAndDuplicateStartConsumesOnlyCandidate) {
+  BoundEventListener listener,candidate;
+  EventCommandExchange exchange; EventPortWorker worker;
+  auto state = std::make_shared<EventIoState>();
+  ASSERT_TRUE(worker.start(std::exchange(listener.fd,-1),exchange,testFactory(state),[]{}));
+  const int fd = candidate.fd;
+  auto duplicate = worker.start(std::exchange(candidate.fd,-1),exchange,testFactory(state),[]{});
+  ASSERT_FALSE(duplicate); EXPECT_EQ(duplicate.error(),EALREADY); EXPECT_EQ(fcntl(fd,F_GETFD),-1);
+  auto first = std::async(std::launch::async,[&]{ return worker.stop(); });
+  auto second = std::async(std::launch::async,[&]{ return worker.stop(); });
+  EXPECT_EQ(first.get(),0); EXPECT_EQ(second.get(),0); EXPECT_EQ(worker.stop(),0);
+}
