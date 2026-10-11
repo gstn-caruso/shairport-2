@@ -7,6 +7,8 @@
 #include <chrono>
 #include <atomic>
 #include <condition_variable>
+#include <sys/resource.h>
+#include <sys/wait.h>
 
 struct EventIoState {
   std::mutex mutex;
@@ -152,4 +154,28 @@ TEST(EventPortWorker, ConcurrentStopsJoinOnceAndDuplicateStartConsumesOnlyCandid
   auto first = std::async(std::launch::async,[&]{ return worker.stop(); });
   auto second = std::async(std::launch::async,[&]{ return worker.stop(); });
   EXPECT_EQ(first.get(),0); EXPECT_EQ(second.get(),0); EXPECT_EQ(worker.stop(),0);
+}
+
+TEST(EventPortWorker, WakeDescriptorExhaustionClosesListenerAndLeavesNoWorker) {
+  const pid_t child = fork(); ASSERT_GE(child,0);
+  if (child == 0) {
+    BoundEventListener listener;
+    struct rlimit limit{};
+    if (getrlimit(RLIMIT_NOFILE,&limit)) _exit(10);
+    limit.rlim_cur = std::min<rlim_t>(limit.rlim_cur,512);
+    if (setrlimit(RLIMIT_NOFILE,&limit)) _exit(11);
+    std::vector<int> fillers;
+    int fd;
+    while ((fd = open("/dev/null",O_RDONLY | O_CLOEXEC)) >= 0) fillers.push_back(fd);
+    EventCommandExchange exchange; EventPortWorker worker;
+    const int owned = listener.fd;
+    auto result = worker.start(std::exchange(listener.fd,-1),exchange,
+        [](int)->std::expected<AcceptedEventChannel,int> { return std::unexpected(EINVAL); },[]{});
+    const bool correct = !result && result.error() == EMFILE &&
+        fcntl(owned,F_GETFD) == -1 && worker.stop() == 0;
+    for (int filler : fillers) close(filler);
+    _exit(correct ? 0 : 12);
+  }
+  int status; ASSERT_EQ(waitpid(child,&status,0),child);
+  ASSERT_TRUE(WIFEXITED(status)); EXPECT_EQ(WEXITSTATUS(status),0);
 }

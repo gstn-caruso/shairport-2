@@ -4,6 +4,9 @@
 #include "protocol/rtsp/rtsp_message.hpp"
 #include "platform/utilities/rtsp_message_utilities.h"
 #include <gtest/gtest.h>
+#include "protocol/ap2/ap2_event_receiver.h"
+#include <netinet/in.h>
+#include <unistd.h>
 
 namespace {
 class RtspDispatch : public testing::Test {
@@ -168,6 +171,31 @@ TEST_F(RtspDispatch, SetupRejectsNtpTiming) {
   dispatch();
 
   EXPECT_EQ(response.responseCode(), 400);
+}
+
+TEST_F(RtspDispatch, RemoteControlSetupAdvertisesOwnedPortAndStopReleasesIt) {
+  connection.connection_ip_family = AF_INET;
+  strcpy(connection.self_ip_string,"127.0.0.1");
+  request.request("SETUP");
+  auto setup = plist_new_dict();
+  plist_dict_set_item(setup,"timingProtocol",plist_new_string("None"));
+  plist_dict_set_item(setup,"isRemoteControlOnly",plist_new_bool(1));
+  replaceBodyWithPlist(request,setup); plist_free(setup);
+  dispatch();
+  ASSERT_EQ(response.responseCode(),200);
+  auto result = plistFromMessageBody(response); ASSERT_NE(result,nullptr);
+  uint64_t port = 0;
+  plist_get_uint_val(plist_dict_get_item(result,"eventPort"),&port); plist_free(result);
+  ASSERT_GT(port,0u); EXPECT_EQ(port,connection.local_event_port);
+  sockaddr_in address{}; address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK); address.sin_port = htons(port);
+  const int candidate = socket(AF_INET,SOCK_STREAM,0); ASSERT_GE(candidate,0);
+  EXPECT_EQ(bind(candidate,reinterpret_cast<sockaddr *>(&address),sizeof(address)),-1);
+  EXPECT_EQ(errno,EADDRINUSE);
+  stop_ap2_event_worker(&connection);
+  EXPECT_EQ(bind(candidate,reinterpret_cast<sockaddr *>(&address),sizeof(address)),0);
+  close(candidate);
+  connection.sessionPlist = nullptr;
 }
 
 TEST_F(RtspDispatch, MetadataRejectsAnIncompleteContainer) {
