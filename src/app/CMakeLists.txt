@@ -1,4 +1,6 @@
 target_sources(receiver PRIVATE shairport.cpp legacy_config_lease.cpp)
+set_source_files_properties(shairport.cpp TARGET_DIRECTORY receiver PROPERTIES CXX_SCAN_FOR_MODULES ON)
+target_link_libraries(receiver PUBLIC receiver-pairing-directory)
 add_library(receiver-configuration STATIC configuration_loader.cpp startup_options.cpp configuration_validation.cpp)
 target_include_directories(receiver-configuration PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_compile_options(receiver-configuration PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)

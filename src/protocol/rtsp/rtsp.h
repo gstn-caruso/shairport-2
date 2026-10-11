@@ -6,7 +6,9 @@
 #ifdef __cplusplus
 #include <memory>
 class SharedRtpTimingSettings;
-int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing);
+class PairingDirectoryPort;
+int rtsp_listener_start(std::shared_ptr<SharedRtpTimingSettings> timing,
+                        std::shared_ptr<PairingDirectoryPort> directory);
 class RtspMessage;
 using rtsp_message = RtspMessage;
 extern "C" {
