@@ -714,9 +714,12 @@ early-zero-rate D7 behavior remain covered. These lifecycle/budget fixes require
 remains 6.1.10 pending release automation.
 
 The Release baseline passes 619/619 in 17.89 seconds; the final suite passes
-629/629 in 18.19 seconds. ASan+UBSan passes 79/79 focused cases in 2.49 seconds,
-and TSan passes 79/79 in 3.40 seconds, including native poll cancellation and
-normal worker stop. The independent transport executable links only the channel,
+630/630 in 18.28 seconds. ASan+UBSan passes 80/80 focused cases in 2.52 seconds,
+and TSan passes 80/80 in 3.40 seconds, including native poll cancellation and
+normal worker stop. Final source review also identified a transient wake-count
+leak if stop was cancelled inside eventfd write. The focused red timed out during
+close; a RAII wake lease now releases that operation on unwind, and the same
+regression passes in all three profiles. The independent transport executable links only the channel,
 native peer component, and GoogleTest; its production object contains both
 sanitizer profiles' instrumentation. Evidence remains under
 `/tmp/control-channel-*`; no new cancellation warnings were observed in these
