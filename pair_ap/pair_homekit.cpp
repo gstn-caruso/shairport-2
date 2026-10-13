@@ -84,7 +84,7 @@ struct pair_keys_map
   uint8_t state;
   const char *salt;
   const char *info;
-  const char nonce[8];
+  const char nonce[9];
 };
 
 static struct pair_keys_map pair_keys_map[] =
@@ -136,9 +136,9 @@ enum pair_flags {
 };
 
 // Forwards
-const struct pair_definition pair_client_homekit_normal;
-const struct pair_definition pair_client_homekit_transient;
-const struct pair_definition pair_server_homekit;
+extern const struct pair_definition pair_client_homekit_normal;
+extern const struct pair_definition pair_client_homekit_transient;
+extern const struct pair_definition pair_server_homekit;
 
 
 /* ---------------------------------- SRP ----------------------------------- */
@@ -238,7 +238,7 @@ static struct NGHex global_Ng_constants[] =
 static NGConstant *
 new_ng(SRP_NGType ng_type, const char *n_hex, const char *g_hex)
 {
-  NGConstant *ng = calloc(1, sizeof(NGConstant));
+  NGConstant *ng = static_cast<NGConstant *>(calloc(1, sizeof(NGConstant)));
 
   if ( ng_type != SRP_NG_CUSTOM )
     {
@@ -344,7 +344,7 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
              const unsigned char *bytes_password, int len_password,
              const char *n_hex, const char *g_hex)
 {
-  struct SRPUser  *usr  = calloc(1, sizeof(struct SRPUser));
+  struct SRPUser  *usr  = static_cast<SRPUser *>(calloc(1, sizeof(struct SRPUser)));
   int              ulen = strlen(username) + 1;
 
   if (!usr)
@@ -360,8 +360,8 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   if (!usr->ng || !usr->a || !usr->A || !usr->S)
     goto err_exit;
 
-  usr->username     = malloc(ulen);
-  usr->password     = malloc(len_password);
+  usr->username     = static_cast<char *>(malloc(ulen));
+  usr->password     = static_cast<uint8_t *>(malloc(len_password));
   usr->password_len = len_password;
 
   if (!usr->username || !usr->password)
@@ -455,7 +455,7 @@ srp_user_start_authentication(struct SRPUser *usr, const char **username,
   bnum_modexp(usr->A, usr->ng->g, usr->a, usr->ng->N);
     
   *len_A   = bnum_num_bytes(usr->A);
-  *bytes_A = malloc(*len_A);
+  *bytes_A = static_cast<uint8_t *>(malloc(*len_A));
 
   if (!*bytes_A)
     {
@@ -585,8 +585,8 @@ srp_create_salted_verification_key(enum hash_alg alg,
   *len_s = bnum_num_bytes(s);
   *len_v = bnum_num_bytes(v);
 
-  *bytes_s = malloc(*len_s);
-  *bytes_v = malloc(*len_v);
+  *bytes_s = static_cast<uint8_t *>(malloc(*len_s));
+  *bytes_v = static_cast<uint8_t *>(malloc(*len_v));
   if (!(*bytes_s) || !(*bytes_v))
     goto error;
 
@@ -655,8 +655,8 @@ srp_verifier_start_authentication(enum hash_alg alg, SRP_NGType ng_type,
   *len_B = bnum_num_bytes(B);
   *len_b = bnum_num_bytes(b);
 
-  *bytes_B = malloc(*len_B);
-  *bytes_b = malloc(*len_b);
+  *bytes_B = static_cast<uint8_t *>(malloc(*len_B));
+  *bytes_b = static_cast<uint8_t *>(malloc(*len_b));
   if (!(*bytes_B) || !(*bytes_b))
     goto error;
 
@@ -729,7 +729,7 @@ srp_verifier_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   if (!s || !v || !A || !B || !S || !b || !tmp1 || !tmp2 || !ng)
     goto error;
 
-  ver = calloc(1, sizeof(struct SRPVerifier));
+  ver = static_cast<SRPVerifier *>(calloc(1, sizeof(struct SRPVerifier)));
   if (!ver)
     goto error;
 
@@ -738,7 +738,7 @@ srp_verifier_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   ver->alg = alg;
   ver->ng  = ng;
 
-  ver->username = malloc(ulen);
+  ver->username = static_cast<char *>(malloc(ulen));
   if (!ver->username)
     goto error;
 
@@ -1149,7 +1149,7 @@ client_setup_request1(size_t *len, struct pair_setup_context *handle)
   int ret;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   request = pair_tlv_new();
 
   // Test here instead of setup_new() so we can give an error message
@@ -1205,7 +1205,7 @@ client_setup_request2(size_t *len, struct pair_setup_context *handle)
   int ret;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   request = pair_tlv_new();
 
   // Calculate A
@@ -1256,7 +1256,7 @@ client_setup_request3(size_t *len, struct pair_setup_context *handle)
   int ret;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   request = pair_tlv_new();
 
   session_key = srp_user_get_session_key(sctx->user, &session_key_len);
@@ -1303,7 +1303,7 @@ client_setup_request3(size_t *len, struct pair_setup_context *handle)
   memcpy(nonce + 4, pair_keys_map[PAIR_SETUP_MSG05].nonce, NONCE_LENGTH - 4);
 
   encrypted_data_len = data_len + sizeof(tag); // Space for ciphered payload and authtag
-  encrypted_data = malloc(encrypted_data_len);
+  encrypted_data = static_cast<uint8_t *>(malloc(encrypted_data_len));
 
   ret = encrypt_chacha(encrypted_data, data, data_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -1367,11 +1367,11 @@ client_setup_response1(struct pair_setup_context *handle, const uint8_t *data, s
     }
 
   sctx->pkB_len = pk->size;
-  sctx->pkB = malloc(sctx->pkB_len);
+  sctx->pkB = static_cast<uint8_t *>(malloc(sctx->pkB_len));
   memcpy(sctx->pkB, pk->value, sctx->pkB_len);
 
   sctx->salt_len = salt->size;
-  sctx->salt = malloc(sctx->salt_len);
+  sctx->salt = static_cast<uint8_t *>(malloc(sctx->salt_len));
   memcpy(sctx->salt, salt->value, sctx->salt_len);
 
   pair_tlv_free(response);
@@ -1405,7 +1405,7 @@ client_setup_response2(struct pair_setup_context *handle, const uint8_t *data, s
     }
 
   sctx->M2_len = proof->size;
-  sctx->M2 = malloc(sctx->M2_len);
+  sctx->M2 = static_cast<uint8_t *>(malloc(sctx->M2_len));
   memcpy(sctx->M2, proof->value, sctx->M2_len);
 
   // Check M2
@@ -1498,7 +1498,7 @@ client_setup_response3(struct pair_setup_context *handle, const uint8_t *data, s
   memcpy(tag, encrypted_data->value + encrypted_len, AUTHTAG_LENGTH);
   memcpy(nonce + 4, pair_keys_map[PAIR_SETUP_MSG06].nonce, NONCE_LENGTH - 4);
 
-  decrypted_data = malloc(encrypted_len);
+  decrypted_data = static_cast<uint8_t *>(malloc(encrypted_len));
 
   ret = decrypt_chacha(decrypted_data, encrypted_data->value, encrypted_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -1629,7 +1629,7 @@ client_verify_request1(size_t *len, struct pair_verify_context *handle)
   int ret;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   request = pair_tlv_new();
 
   crypto_box_keypair(vctx->client_eph_public_key, vctx->client_eph_private_key);
@@ -1680,7 +1680,7 @@ client_verify_request2(size_t *len, struct pair_verify_context *handle)
   int ret;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   request = pair_tlv_new();
 
   ret = create_and_sign_device_info(data, &data_len, vctx->device_id, vctx->client_eph_public_key, sizeof(vctx->client_eph_public_key),
@@ -1701,7 +1701,7 @@ client_verify_request2(size_t *len, struct pair_verify_context *handle)
   memcpy(nonce + 4, pair_keys_map[PAIR_VERIFY_MSG03].nonce, NONCE_LENGTH - 4);
 
   encrypted_data_len = data_len + sizeof(tag); // Space for ciphered payload and authtag
-  encrypted_data = malloc(encrypted_data_len);
+  encrypted_data = static_cast<uint8_t *>(malloc(encrypted_data_len));
 
   ret = encrypt_chacha(encrypted_data, data, data_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -1798,7 +1798,7 @@ client_verify_response1(struct pair_verify_context *handle, const uint8_t *data,
   memcpy(tag, encrypted_data->value + encrypted_len, AUTHTAG_LENGTH);
   memcpy(nonce + 4, pair_keys_map[PAIR_VERIFY_MSG02].nonce, NONCE_LENGTH - 4);
 
-  decrypted_data = malloc(encrypted_len);
+  decrypted_data = static_cast<uint8_t *>(malloc(encrypted_len));
 
   ret = decrypt_chacha(decrypted_data, encrypted_data->value, encrypted_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -1894,7 +1894,7 @@ server_auth_failed_response(size_t *len, enum pair_keys msg_state)
   uint8_t error = TLVError_Authentication;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
@@ -2028,11 +2028,11 @@ server_setup_request2(struct pair_setup_context *handle, const uint8_t *data, si
     }
 
   sctx->pkA_len = pk->size;
-  sctx->pkA = malloc(sctx->pkA_len);
+  sctx->pkA = static_cast<uint8_t *>(malloc(sctx->pkA_len));
   memcpy(sctx->pkA, pk->value, sctx->pkA_len);
 
   sctx->M1_len = proof->size;
-  sctx->M1 = malloc(sctx->M1_len);
+  sctx->M1 = static_cast<uint8_t *>(malloc(sctx->M1_len));
   memcpy(sctx->M1, proof->value, sctx->M1_len);
 
   sctx->verifier = srp_verifier_new(HASH_SHA512, SRP_NG_3072, USERNAME, sctx->salt, sctx->salt_len, sctx->v, sctx->v_len,
@@ -2114,7 +2114,7 @@ server_setup_request3(struct pair_setup_context *handle, const uint8_t *data, si
   memcpy(tag, encrypted_data->value + encrypted_len, AUTHTAG_LENGTH);
   memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
-  decrypted_data = malloc(encrypted_len);
+  decrypted_data = static_cast<uint8_t *>(malloc(encrypted_len));
 
   ret = decrypt_chacha(decrypted_data, encrypted_data->value, encrypted_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -2178,7 +2178,7 @@ server_setup_response1(size_t *len, struct pair_setup_context *handle)
     return server_auth_failed_response(len, msg_state);
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
@@ -2218,7 +2218,7 @@ server_setup_response2(size_t *len, struct pair_setup_context *handle)
     return server_auth_failed_response(len, msg_state);
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
@@ -2281,7 +2281,7 @@ server_setup_response3(size_t *len, struct pair_setup_context *handle)
     return server_auth_failed_response(len, msg_state);
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   session_key = srp_verifier_get_session_key(sctx->verifier, &session_key_len);
@@ -2323,7 +2323,7 @@ server_setup_response3(size_t *len, struct pair_setup_context *handle)
   memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
   encrypted_data_len = data_len + sizeof(tag); // Space for ciphered payload and authtag
-  encrypted_data = malloc(encrypted_data_len);
+  encrypted_data = static_cast<uint8_t *>(malloc(encrypted_data_len));
 
   ret = encrypt_chacha(encrypted_data, data, data_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -2463,7 +2463,7 @@ server_verify_request2(struct pair_verify_context *handle, const uint8_t *data, 
   memcpy(tag, encrypted_data->value + encrypted_len, AUTHTAG_LENGTH);
   memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
-  decrypted_data = malloc(encrypted_len);
+  decrypted_data = static_cast<uint8_t *>(malloc(encrypted_len));
 
   ret = decrypt_chacha(decrypted_data, encrypted_data->value, encrypted_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -2540,7 +2540,7 @@ server_verify_response1(size_t *len, struct pair_verify_context *handle)
     return server_auth_failed_response(len, msg_state);
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   crypto_box_keypair(vctx->server_eph_public_key, vctx->server_eph_private_key);
@@ -2567,7 +2567,7 @@ server_verify_response1(size_t *len, struct pair_verify_context *handle)
   memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
   encrypted_data_len = data_len + sizeof(tag); // Space for ciphered payload and authtag
-  encrypted_data = malloc(encrypted_data_len);
+  encrypted_data = static_cast<uint8_t *>(malloc(encrypted_data_len));
 
   ret = encrypt_chacha(encrypted_data, data, data_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
@@ -2615,7 +2615,7 @@ server_verify_response2(size_t *len, struct pair_verify_context *handle)
     return server_auth_failed_response(len, msg_state);
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
@@ -2693,7 +2693,7 @@ server_add_remove_response(size_t *len)
   int ret;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   pair_tlv_add_value(response, TLVType_State, &state, sizeof(state));
@@ -2734,7 +2734,7 @@ server_add_remove(uint8_t **out, size_t *out_len, pair_cb cb, void *cb_arg, cons
 static int
 server_list_cb(uint8_t public_key[crypto_sign_PUBLICKEYBYTES], const char *device_id, void *cb_arg)
 {
-  pair_tlv_values_t *response = cb_arg;
+  pair_tlv_values_t *response = static_cast<pair_tlv_values_t *>(cb_arg);
   pair_tlv_t *previous_id;
   uint8_t permissions = 1; // Means admin (TODO don't hardcode - let caller set)
 
@@ -2760,7 +2760,7 @@ server_list_response(size_t *len, pair_list_cb cb, void *cb_arg)
   int ret;
 
   data_len = REQUEST_BUFSIZE;
-  data = malloc(data_len);
+  data = static_cast<uint8_t *>(malloc(data_len));
   response = pair_tlv_new();
 
   pair_tlv_add_value(response, TLVType_State, &state, sizeof(state));
@@ -2810,12 +2810,12 @@ cipher_free(struct pair_cipher_context *cctx)
 }
 
 static struct pair_cipher_context *
-cipher_new_with_salt_and_info(struct pair_definition *type, const uint8_t *shared_secret, size_t shared_secret_len, const char *write_salt, const char *write_info, const char *read_salt, const char *read_info)
+cipher_new_with_salt_and_info(const struct pair_definition *type, const uint8_t *shared_secret, size_t shared_secret_len, const char *write_salt, const char *write_info, const char *read_salt, const char *read_info)
 {
   struct pair_cipher_context *cctx;
   int ret;
 
-  cctx = calloc(1, sizeof(struct pair_cipher_context));
+  cctx = static_cast<pair_cipher_context *>(calloc(1, sizeof(struct pair_cipher_context)));
   if (!cctx)
     goto error;
 
@@ -2837,7 +2837,7 @@ cipher_new_with_salt_and_info(struct pair_definition *type, const uint8_t *share
 }
 
 static struct pair_cipher_context *
-cipher_new(struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *dynamic_salt_suffix)
+cipher_new(const struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *dynamic_salt_suffix)
 {
 
   enum pair_keys write_key;
@@ -2907,7 +2907,7 @@ encrypt(uint8_t **ciphertext, size_t *ciphertext_len, const uint8_t *plaintext, 
   nblocks = 1 + ((plaintext_len - 1) / ENCRYPTED_LEN_MAX); // Ceiling of division
 
   *ciphertext_len = nblocks * (sizeof(block_len) + AUTHTAG_LENGTH) + plaintext_len;
-  *ciphertext = malloc(*ciphertext_len);
+  *ciphertext = static_cast<uint8_t *>(malloc(*ciphertext_len));
 
   cctx->encryption_counter_prev = cctx->encryption_counter;
 
@@ -2957,7 +2957,7 @@ decrypt(uint8_t **plaintext, size_t *plaintext_len, const uint8_t *ciphertext, s
 
   // This will allocate more than we need. Since we don't know the number of
   // blocks in the ciphertext yet we can't calculate the exact required length.
-  *plaintext = malloc(ciphertext_len);
+  *plaintext = static_cast<uint8_t *>(malloc(ciphertext_len));
 
   cctx->decryption_counter_prev = cctx->decryption_counter;
 

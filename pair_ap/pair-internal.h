@@ -93,7 +93,7 @@ enum pair_status
 
 struct pair_setup_context
 {
-  struct pair_definition *type;
+  const struct pair_definition *type;
 
   enum pair_status status;
   const char *errmsg;
@@ -155,7 +155,7 @@ struct pair_server_verify_context
 
 struct pair_verify_context
 {
-  struct pair_definition *type;
+  const struct pair_definition *type;
 
   enum pair_status status;
   const char *errmsg;
@@ -171,7 +171,7 @@ struct pair_verify_context
 
 struct pair_cipher_context
 {
-  struct pair_definition *type;
+  const struct pair_definition *type;
 
   uint8_t encryption_key[32];
   uint8_t decryption_key[32];
@@ -214,7 +214,7 @@ struct pair_definition
   int (*pair_remove)(uint8_t **out, size_t *out_len, pair_cb cb, void *cb_arg, const uint8_t *in, size_t in_len);
   int (*pair_list)(uint8_t **out, size_t *out_len, pair_list_cb cb, void *cb_arg, const uint8_t *in, size_t in_len);
 
-  struct pair_cipher_context *(*pair_cipher_new)(struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *dynamic_salt_suffix);
+  struct pair_cipher_context *(*pair_cipher_new)(const struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *dynamic_salt_suffix);
   void (*pair_cipher_free)(struct pair_cipher_context *cctx);
 
   ssize_t (*pair_encrypt)(uint8_t **ciphertext, size_t *ciphertext_len, const uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);

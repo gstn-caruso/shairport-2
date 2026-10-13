@@ -57,15 +57,17 @@ if cmake -S "$source_dir" -B "$test_dir/platform" -G Ninja \
   exit 1
 fi
 grep -q 'Linux is the only supported platform' "$test_dir/output"
-printf 'set_source_files_properties("%s/src/app/main.cpp" PROPERTIES LANGUAGE C)\n' "$source_dir" \
-  > "$test_dir/c-production.cmake"
-if cmake -S "$source_dir" -B "$test_dir/c-production" -G Ninja \
-    -DCMAKE_C_COMPILER="$c_compiler" -DCMAKE_CXX_COMPILER="$cxx_compiler" \
-    -DCMAKE_USER_MAKE_RULES_OVERRIDE="$test_dir/c-production.cmake" \
-    > "$test_dir/output" 2>&1; then
-  echo 'Accepted own production source compiled as C' >&2
-  exit 1
-fi
-grep -q 'Own production source must compile as C++26' "$test_dir/output"
+for production_source in src/app/main.cpp pair_ap/pair.cpp pair_ap/pair_fruit.cpp pair_ap/pair_homekit.cpp pair_ap/pair-tlv.cpp; do
+  printf 'set_source_files_properties("%s/%s" PROPERTIES LANGUAGE C)\n' "$source_dir" "$production_source" \
+    > "$test_dir/c-production.cmake"
+  if cmake -S "$source_dir" -B "$test_dir/c-production-$production_source" -G Ninja \
+      -DCMAKE_C_COMPILER="$c_compiler" -DCMAKE_CXX_COMPILER="$cxx_compiler" \
+      -DCMAKE_USER_MAKE_RULES_OVERRIDE="$test_dir/c-production.cmake" \
+      > "$test_dir/output" 2>&1; then
+    echo "Accepted own production source compiled as C: $production_source" >&2
+    exit 1
+  fi
+  grep -q 'Own production source must compile as C++26' "$test_dir/output"
+done
 test -f "$build_dir/plists/get_info_response.cpp"
 echo 'Pinned C++26 Linux AirPlay 2 configuration contract passed.'

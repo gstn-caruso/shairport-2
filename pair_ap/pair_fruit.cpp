@@ -112,7 +112,7 @@ static struct NGHex global_Ng_constants[] =
 static NGConstant *
 new_ng(SRP_NGType ng_type, const char *n_hex, const char *g_hex)
 {
-  NGConstant *ng = calloc(1, sizeof(NGConstant));
+  NGConstant *ng = static_cast<NGConstant *>(calloc(1, sizeof(NGConstant)));
 
   if ( ng_type != SRP_NG_CUSTOM )
     {
@@ -158,7 +158,7 @@ static int
 hash_session_key(enum hash_alg alg, const bnum n, unsigned char *dest)
 {
   int           nbytes = bnum_num_bytes(n);
-  unsigned char *bin   = malloc(nbytes);
+  unsigned char *bin   = static_cast<uint8_t *>(malloc(nbytes));
   unsigned char fourbytes[4] = { 0 }; // Only God knows the reason for this, and perhaps some poor soul at Apple
 
   bnum_bn2bin(n, bin, nbytes);
@@ -225,7 +225,7 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
              const unsigned char *bytes_password, int len_password,
              const char *n_hex, const char *g_hex)
 {
-  struct SRPUser  *usr  = calloc(1, sizeof(struct SRPUser));
+  struct SRPUser  *usr  = static_cast<SRPUser *>(calloc(1, sizeof(struct SRPUser)));
   int              ulen = strlen(username) + 1;
 
   if (!usr)
@@ -241,8 +241,8 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   if (!usr->ng || !usr->a || !usr->A || !usr->S)
     goto err_exit;
 
-  usr->username     = malloc(ulen);
-  usr->password     = malloc(len_password);
+  usr->username     = static_cast<char *>(malloc(ulen));
+  usr->password     = static_cast<uint8_t *>(malloc(len_password));
   usr->password_len = len_password;
 
   if (!usr->username || !usr->password)
@@ -320,7 +320,7 @@ srp_user_start_authentication(struct SRPUser *usr, const char **username,
   bnum_modexp(usr->A, usr->ng->g, usr->a, usr->ng->N);
 
   *len_A   = bnum_num_bytes(usr->A);
-  *bytes_A = malloc(*len_A);
+  *bytes_A = static_cast<uint8_t *>(malloc(*len_A));
 
   if (!*bytes_A)
     {
@@ -841,7 +841,7 @@ client_verify_request1(size_t *len, struct pair_verify_context *handle)
     }
 
   *len = 4 + sizeof(vctx->client_eph_public_key) + sizeof(vctx->client_public_key);
-  data = calloc(1, *len);
+  data = static_cast<uint8_t *>(calloc(1, *len));
   if (!data)
     {
       handle->errmsg = "Verify request 1: Out of memory";
@@ -869,7 +869,7 @@ client_verify_request2(size_t *len, struct pair_verify_context *handle)
   const char *errmsg;
 
   *len = sizeof(vctx->client_eph_public_key) + sizeof(vctx->server_eph_public_key);
-  data = calloc(1, *len);
+  data = static_cast<uint8_t *>(calloc(1, *len));
   if (!data)
     {
       handle->errmsg = "Verify request 2: Out of memory";
@@ -912,7 +912,7 @@ client_verify_request2(size_t *len, struct pair_verify_context *handle)
     }
 
   *len = 4 + sizeof(vctx->server_fruit_public_key);
-  data = calloc(1, *len);
+  data = static_cast<uint8_t *>(calloc(1, *len));
   if (!data)
     {
       handle->errmsg = "Verify request 2: Out of memory";

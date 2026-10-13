@@ -2,6 +2,11 @@
 #define __PAIR_AP_TLV_H__
 
 #include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define PAIR_TLV_ERROR_MEMORY -1
 #define PAIR_TLV_ERROR_INSUFFICIENT_SIZE -2
@@ -72,6 +77,10 @@ int pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *valu
 
 #ifdef DEBUG_PAIR
 void pair_tlv_debug(const pair_tlv_values_t *values);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif  /* !__PAIR_AP_TLV_H__ */

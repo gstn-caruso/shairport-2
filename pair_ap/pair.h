@@ -2,6 +2,12 @@
 #define __PAIR_AP_H__
 
 #include <stdint.h>
+#include <stddef.h>
+#include <sys/types.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define PAIR_AP_VERSION_MAJOR 0
 #define PAIR_AP_VERSION_MINOR 14
@@ -262,5 +268,9 @@ pair_state_get(enum pair_type type, const char **errmsg, const uint8_t *in, size
  */
 void
 pair_public_key_get(enum pair_type type, uint8_t server_public_key[32], const char *device_id);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  /* !__PAIR_AP_H__ */

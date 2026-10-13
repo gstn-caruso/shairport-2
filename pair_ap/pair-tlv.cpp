@@ -35,7 +35,7 @@
 
 static int
 tlv_add_value_(pair_tlv_values_t *values, uint8_t type, uint8_t *value, size_t size) {
-    pair_tlv_t *tlv = malloc(sizeof(pair_tlv_t));
+    pair_tlv_t *tlv = static_cast<pair_tlv_t *>(malloc(sizeof(pair_tlv_t)));
     if (!tlv) {
         return PAIR_TLV_ERROR_MEMORY;
     }
@@ -60,7 +60,7 @@ tlv_add_value_(pair_tlv_values_t *values, uint8_t type, uint8_t *value, size_t s
 
 pair_tlv_values_t *
 pair_tlv_new() {
-    pair_tlv_values_t *values = malloc(sizeof(pair_tlv_values_t));
+    pair_tlv_values_t *values = static_cast<pair_tlv_values_t *>(malloc(sizeof(pair_tlv_values_t)));
     if (!values)
         return NULL;
 
@@ -89,7 +89,7 @@ pair_tlv_add_value(pair_tlv_values_t *values, uint8_t type, const uint8_t *value
     uint8_t *data = NULL;
     int ret;
     if (size) {
-        data = malloc(size);
+        data = static_cast<uint8_t *>(malloc(size));
         if (!data) {
             return PAIR_TLV_ERROR_MEMORY;
         }
@@ -183,7 +183,7 @@ pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *values) 
 
         // allocate memory to hold all pieces of chunked data and copy data there
         if (size != 0) {
-            data = malloc(size);
+            data = static_cast<uint8_t *>(malloc(size));
             if (!data)
                 return PAIR_TLV_ERROR_MEMORY;
 

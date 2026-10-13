@@ -33,12 +33,12 @@
 #include "pair-internal.h"
 
 extern struct pair_definition pair_client_fruit;
-extern struct pair_definition pair_client_homekit_normal;
-extern struct pair_definition pair_client_homekit_transient;
-extern struct pair_definition pair_server_homekit;
+extern const struct pair_definition pair_client_homekit_normal;
+extern const struct pair_definition pair_client_homekit_transient;
+extern const struct pair_definition pair_server_homekit;
 
 // Must be in sync with enum pair_type
-static struct pair_definition *pair[] = {
+static const struct pair_definition *pair[] = {
     &pair_client_fruit,
     &pair_client_homekit_normal,
     &pair_client_homekit_transient,
@@ -138,7 +138,7 @@ H_nn_pad(enum hash_alg alg, const bnum n1, const bnum n2, int padded_len)
   assert(len_n1 <= padded_len);
   assert(len_n2 <= padded_len);
 
-  bin = calloc(1, nbytes);
+  bin = static_cast<uint8_t *>(calloc(1, nbytes));
 
   bnum_bn2bin(n1, bin + offset_n1, len_n1);
   bnum_bn2bin(n2, bin + offset_n2, len_n2);
@@ -155,7 +155,7 @@ H_ns(enum hash_alg alg, const bnum n, const unsigned char *bytes, int len_bytes)
   unsigned char buff[SHA512_DIGEST_LENGTH];
   int           len_n  = bnum_num_bytes(n);
   int           nbytes = len_n + len_bytes;
-  unsigned char *bin   = malloc(nbytes);
+  unsigned char *bin   = static_cast<uint8_t *>(malloc(nbytes));
 
   bnum_bn2bin(n, bin, len_n);
   memcpy(bin + len_n, bytes, len_bytes);
@@ -169,7 +169,7 @@ void
 update_hash_n(enum hash_alg alg, HashCTX *ctx, const bnum n)
 {
   unsigned long len = bnum_num_bytes(n);
-  unsigned char *n_bytes = malloc(len);
+  unsigned char *n_bytes = static_cast<uint8_t *>(malloc(len));
 
   bnum_bn2bin(n, n_bytes, len);
   hash_update(alg, ctx, n_bytes, len);
@@ -180,7 +180,7 @@ void
 hash_num(enum hash_alg alg, const bnum n, unsigned char *dest)
 {
   int           nbytes = bnum_num_bytes(n);
-  unsigned char *bin   = malloc(nbytes);
+  unsigned char *bin   = static_cast<uint8_t *>(malloc(nbytes));
 
   bnum_bn2bin(n, bin, nbytes);
   hash( alg, bin, nbytes, dest );
@@ -231,7 +231,7 @@ void
 bnum_dump(const char *msg, bnum n)
 {
   int len_n = bnum_num_bytes(n);
-  uint8_t *bin = calloc(1, len_n);
+  uint8_t *bin = static_cast<uint8_t *>(calloc(1, len_n));
   bnum_bn2bin(n, bin, len_n);
   hexdump(msg, bin, len_n);
   free(bin);
@@ -249,7 +249,7 @@ pair_setup_new(enum pair_type type, const char *pin, pair_cb add_cb, void *cb_ar
   if (!pair[type]->pair_setup_new)
     return NULL;
 
-  sctx = calloc(1, sizeof(struct pair_setup_context));
+  sctx = static_cast<pair_setup_context *>(calloc(1, sizeof(struct pair_setup_context)));
   if (!sctx)
     return NULL;
 
@@ -457,7 +457,7 @@ pair_verify_new(enum pair_type type, const char *client_setup_keys, pair_cb get_
   if (!pair[type]->pair_verify_new)
     return NULL;
 
-  vctx = calloc(1, sizeof(struct pair_verify_context));
+  vctx = static_cast<pair_verify_context *>(calloc(1, sizeof(struct pair_verify_context)));
   if (!vctx)
     return NULL;
 
