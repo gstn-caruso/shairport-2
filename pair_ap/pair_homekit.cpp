@@ -157,6 +157,16 @@ typedef struct
   bnum g;
 } NGConstant;
 
+/**
+ * @brief Owns the client-side SRP state used by HomeKit pairing setup.
+ *
+ * The group, big numbers, credentials and allocated public value are released by
+ * srp_user_free(). Proof and session-key pointers returned by helpers borrow this
+ * state's inline storage. Its group layout and session-key derivation differ
+ * from Fruit's implementation, which has a separate protocol-specific type.
+ * @note The setup context controls lifetime and serializes SRP operations.
+ * @see pair_client_setup_context
+ */
 struct SRPUser
 {
   enum hash_alg     alg;
@@ -179,6 +189,16 @@ struct SRPUser
   int           session_key_len;
 };
 
+/**
+ * @brief Owns the server's SRP proof and authenticated session-key state.
+ *
+ * The verifier owns its group and copied username. Its public-value pointer is
+ * borrowed from the server setup context, which releases that buffer separately.
+ * Proof and session-key views returned by helpers borrow inline verifier storage
+ * and expire at srp_verifier_free().
+ * @note The server setup context controls lifetime and serializes verification.
+ * @see pair_server_setup_context
+ */
 struct SRPVerifier
 {
   enum hash_alg     alg;

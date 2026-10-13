@@ -65,6 +65,16 @@ typedef struct
   int N_len;
 } NGConstant;
 
+/**
+ * @brief Owns the client-side SRP state used by the Fruit pairing protocol.
+ *
+ * The group, big numbers, credentials and allocated public value belong to this
+ * state and are released by srp_user_free(). Proof and session-key views returned
+ * by SRP helpers borrow its inline storage. Fruit derives a double-length session
+ * key, so this type is distinct from HomeKit's SRP user despite similar fields.
+ * @note The setup context controls lifetime and serializes SRP operations.
+ * @see pair_client_setup_context
+ */
 struct SRPUser
 {
   enum hash_alg     alg;
