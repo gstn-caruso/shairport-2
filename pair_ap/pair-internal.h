@@ -8,12 +8,21 @@
   do { handle->status = (s); handle->errmsg = (m); goto error; } while(0)
 
 
+namespace fruit {
+struct SRPUser;
+}
+namespace homekit {
 struct SRPUser;
 struct SRPVerifier;
+}
 
 struct pair_client_setup_context
 {
-  struct SRPUser *user;
+  union
+  {
+    fruit::SRPUser *fruitUser;
+    homekit::SRPUser *homekitUser;
+  };
 
   char *pin;
   char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
@@ -48,7 +57,7 @@ struct pair_client_setup_context
 
 struct pair_server_setup_context
 {
-  struct SRPVerifier *verifier;
+  homekit::SRPVerifier *verifier;
 
   char *pin;
   char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];

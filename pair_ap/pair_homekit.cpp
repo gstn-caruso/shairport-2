@@ -46,6 +46,12 @@
 #include "pair-internal.h"
 #include "pair-tlv.h"
 
+extern const struct pair_definition pair_client_homekit_normal;
+extern const struct pair_definition pair_client_homekit_transient;
+extern const struct pair_definition pair_server_homekit;
+
+namespace homekit {
+
 
 /* ----------------------------- DEFINES ETC ------------------------------- */
 
@@ -134,12 +140,6 @@ enum pair_method {
 enum pair_flags {
   PairingFlagsTransient           = 0x10,
 };
-
-// Forwards
-extern const struct pair_definition pair_client_homekit_normal;
-extern const struct pair_definition pair_client_homekit_transient;
-extern const struct pair_definition pair_server_homekit;
-
 
 /* ---------------------------------- SRP ----------------------------------- */
 
@@ -1089,6 +1089,7 @@ static int
 client_setup_new(struct pair_setup_context *handle, const char *pin, pair_cb add_cb, void *cb_arg, const char *device_id)
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
+  sctx->homekitUser = nullptr;
 
   if (!is_initialized())
     return -1;
@@ -1126,7 +1127,7 @@ client_setup_free(struct pair_setup_context *handle)
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
 
-  srp_user_free(sctx->user);
+  srp_user_free(sctx->homekitUser);
 
   free(sctx->pkB);
   free(sctx->M2);
@@ -1159,8 +1160,8 @@ client_setup_request1(size_t *len, struct pair_setup_context *handle)
       goto error;
     }
 
-  sctx->user = srp_user_new(HASH_SHA512, SRP_NG_3072, USERNAME, (unsigned char *)sctx->pin, strlen(sctx->pin), 0, 0);
-  if (!sctx->user)
+  sctx->homekitUser = srp_user_new(HASH_SHA512, SRP_NG_3072, USERNAME, (unsigned char *)sctx->pin, strlen(sctx->pin), 0, 0);
+  if (!sctx->homekitUser)
     {
       handle->errmsg = "Setup request 1: Create SRP user failed";
       goto error;
@@ -1209,10 +1210,10 @@ client_setup_request2(size_t *len, struct pair_setup_context *handle)
   request = pair_tlv_new();
 
   // Calculate A
-  srp_user_start_authentication(sctx->user, &auth_username, &sctx->pkA, &sctx->pkA_len);
+  srp_user_start_authentication(sctx->homekitUser, &auth_username, &sctx->pkA, &sctx->pkA_len);
 
   // Calculate M1 (client proof)
-  srp_user_process_challenge(sctx->user, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
+  srp_user_process_challenge(sctx->homekitUser, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
 
   pair_tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG03].state, sizeof(pair_keys_map[PAIR_SETUP_MSG03].state));
   pair_tlv_add_value(request, TLVType_PublicKey, sctx->pkA, sctx->pkA_len);
@@ -1259,7 +1260,7 @@ client_setup_request3(size_t *len, struct pair_setup_context *handle)
   data = static_cast<uint8_t *>(malloc(data_len));
   request = pair_tlv_new();
 
-  session_key = srp_user_get_session_key(sctx->user, &session_key_len);
+  session_key = srp_user_get_session_key(sctx->homekitUser, &session_key_len);
   if (!session_key)
     {
       handle->errmsg = "Setup request 3: No valid session key";
@@ -1409,8 +1410,8 @@ client_setup_response2(struct pair_setup_context *handle, const uint8_t *data, s
   memcpy(sctx->M2, proof->value, sctx->M2_len);
 
   // Check M2
-  srp_user_verify_session(sctx->user, (const unsigned char *)sctx->M2);
-  if (!srp_user_is_authenticated(sctx->user))
+  srp_user_verify_session(sctx->homekitUser, (const unsigned char *)sctx->M2);
+  if (!srp_user_is_authenticated(sctx->homekitUser))
     {
       handle->errmsg = "Setup response 2: Server authentication failed";
       goto error;
@@ -1418,7 +1419,7 @@ client_setup_response2(struct pair_setup_context *handle, const uint8_t *data, s
 
   if (handle->type == &pair_client_homekit_transient)
     {
-      session_key = srp_user_get_session_key(sctx->user, &session_key_len);
+      session_key = srp_user_get_session_key(sctx->homekitUser, &session_key_len);
       if (!session_key)
         {
 	  handle->errmsg = "Setup response 2: Could not compute session key";
@@ -1473,7 +1474,7 @@ client_setup_response3(struct pair_setup_context *handle, const uint8_t *data, s
       goto error;
     }
 
-  session_key = srp_user_get_session_key(sctx->user, &session_key_len);
+  session_key = srp_user_get_session_key(sctx->homekitUser, &session_key_len);
   if (!session_key)
     {
       handle->errmsg = "Setup response 3: No valid session key";
@@ -3040,98 +3041,100 @@ public_key_get(uint8_t server_public_key[crypto_sign_PUBLICKEYBYTES], const char
   server_keypair(server_public_key, private_key, device_id);
 }
 
+} // namespace homekit
+
 const struct pair_definition pair_client_homekit_normal =
 {
-  .pair_setup_new = client_setup_new,
-  .pair_setup_free = client_setup_free,
-  .pair_setup_result = client_setup_result,
+  .pair_setup_new = homekit::client_setup_new,
+  .pair_setup_free = homekit::client_setup_free,
+  .pair_setup_result = homekit::client_setup_result,
 
-  .pair_setup_request1 = client_setup_request1,
-  .pair_setup_request2 = client_setup_request2,
-  .pair_setup_request3 = client_setup_request3,
+  .pair_setup_request1 = homekit::client_setup_request1,
+  .pair_setup_request2 = homekit::client_setup_request2,
+  .pair_setup_request3 = homekit::client_setup_request3,
 
-  .pair_setup_response1 = client_setup_response1,
-  .pair_setup_response2 = client_setup_response2,
-  .pair_setup_response3 = client_setup_response3,
+  .pair_setup_response1 = homekit::client_setup_response1,
+  .pair_setup_response2 = homekit::client_setup_response2,
+  .pair_setup_response3 = homekit::client_setup_response3,
 
-  .pair_verify_new = client_verify_new,
+  .pair_verify_new = homekit::client_verify_new,
 
-  .pair_verify_request1 = client_verify_request1,
-  .pair_verify_request2 = client_verify_request2,
+  .pair_verify_request1 = homekit::client_verify_request1,
+  .pair_verify_request2 = homekit::client_verify_request2,
 
-  .pair_verify_response1 = client_verify_response1,
-  .pair_verify_response2 = client_verify_response2,
+  .pair_verify_response1 = homekit::client_verify_response1,
+  .pair_verify_response2 = homekit::client_verify_response2,
 
-  .pair_cipher_new = cipher_new,
-  .pair_cipher_free = cipher_free,
+  .pair_cipher_new = homekit::cipher_new,
+  .pair_cipher_free = homekit::cipher_free,
 
-  .pair_encrypt = encrypt,
-  .pair_decrypt = decrypt,
+  .pair_encrypt = homekit::encrypt,
+  .pair_decrypt = homekit::decrypt,
 
-  .pair_state_get = state_get,
+  .pair_state_get = homekit::state_get,
 };
 
 const struct pair_definition pair_client_homekit_transient =
 {
-  .pair_setup_new = client_setup_new,
-  .pair_setup_free = client_setup_free,
+  .pair_setup_new = homekit::client_setup_new,
+  .pair_setup_free = homekit::client_setup_free,
 
-  .pair_setup_request1 = client_setup_request1,
-  .pair_setup_request2 = client_setup_request2,
-  .pair_setup_request3 = client_setup_request3,
+  .pair_setup_request1 = homekit::client_setup_request1,
+  .pair_setup_request2 = homekit::client_setup_request2,
+  .pair_setup_request3 = homekit::client_setup_request3,
 
-  .pair_setup_response1 = client_setup_response1,
-  .pair_setup_response2 = client_setup_response2,
-  .pair_setup_response3 = client_setup_response3,
+  .pair_setup_response1 = homekit::client_setup_response1,
+  .pair_setup_response2 = homekit::client_setup_response2,
+  .pair_setup_response3 = homekit::client_setup_response3,
 
-  .pair_verify_new = client_verify_new,
+  .pair_verify_new = homekit::client_verify_new,
 
-  .pair_verify_request1 = client_verify_request1,
-  .pair_verify_request2 = client_verify_request2,
+  .pair_verify_request1 = homekit::client_verify_request1,
+  .pair_verify_request2 = homekit::client_verify_request2,
 
-  .pair_verify_response1 = client_verify_response1,
-  .pair_verify_response2 = client_verify_response2,
+  .pair_verify_response1 = homekit::client_verify_response1,
+  .pair_verify_response2 = homekit::client_verify_response2,
 
-  .pair_cipher_new = cipher_new,
-  .pair_cipher_free = cipher_free,
+  .pair_cipher_new = homekit::cipher_new,
+  .pair_cipher_free = homekit::cipher_free,
 
-  .pair_encrypt = encrypt,
-  .pair_decrypt = decrypt,
+  .pair_encrypt = homekit::encrypt,
+  .pair_decrypt = homekit::decrypt,
 
-  .pair_state_get = state_get,
+  .pair_state_get = homekit::state_get,
 };
 
 const struct pair_definition pair_server_homekit =
 {
-  .pair_setup_new = server_setup_new,
-  .pair_setup_free = server_setup_free,
+  .pair_setup_new = homekit::server_setup_new,
+  .pair_setup_free = homekit::server_setup_free,
 
-  .pair_setup_request1 = server_setup_response1,
-  .pair_setup_request2 = server_setup_response2,
-  .pair_setup_request3 = server_setup_response3,
+  .pair_setup_request1 = homekit::server_setup_response1,
+  .pair_setup_request2 = homekit::server_setup_response2,
+  .pair_setup_request3 = homekit::server_setup_response3,
 
-  .pair_setup_response1 = server_setup_request1,
-  .pair_setup_response2 = server_setup_request2,
-  .pair_setup_response3 = server_setup_request3,
+  .pair_setup_response1 = homekit::server_setup_request1,
+  .pair_setup_response2 = homekit::server_setup_request2,
+  .pair_setup_response3 = homekit::server_setup_request3,
 
-  .pair_verify_new = server_verify_new,
+  .pair_verify_new = homekit::server_verify_new,
 
-  .pair_verify_request1 = server_verify_response1,
-  .pair_verify_request2 = server_verify_response2,
+  .pair_verify_request1 = homekit::server_verify_response1,
+  .pair_verify_request2 = homekit::server_verify_response2,
 
-  .pair_verify_response1 = server_verify_request1,
-  .pair_verify_response2 = server_verify_request2,
+  .pair_verify_response1 = homekit::server_verify_request1,
+  .pair_verify_response2 = homekit::server_verify_request2,
 
-  .pair_add = server_add_remove,
-  .pair_remove = server_add_remove,
-  .pair_list = server_list,
+  .pair_add = homekit::server_add_remove,
+  .pair_remove = homekit::server_add_remove,
+  .pair_list = homekit::server_list,
 
-  .pair_cipher_new = cipher_new,
-  .pair_cipher_free = cipher_free,
+  .pair_cipher_new = homekit::cipher_new,
+  .pair_cipher_free = homekit::cipher_free,
 
-  .pair_encrypt = encrypt,
-  .pair_decrypt = decrypt,
+  .pair_encrypt = homekit::encrypt,
+  .pair_decrypt = homekit::decrypt,
 
-  .pair_state_get = state_get,
-  .pair_public_key_get = public_key_get,
+  .pair_state_get = homekit::state_get,
+  .pair_public_key_get = homekit::public_key_get,
 };

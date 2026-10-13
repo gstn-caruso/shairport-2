@@ -37,6 +37,8 @@
 
 #include "pair-internal.h"
 
+namespace fruit {
+
 /* ----------------------------- DEFINES ETC ------------------------------- */
 
 #define USERNAME "12:34:56:78:90:AB"
@@ -516,6 +518,7 @@ static int
 client_setup_new(struct pair_setup_context *handle, const char *pin, __attribute__((unused)) pair_cb add_cb, __attribute__((unused)) void *cb_arg, __attribute__((unused)) const char *device_id)
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
+  sctx->fruitUser = nullptr;
 
   if (!is_initialized())
     return -1;
@@ -535,7 +538,7 @@ client_setup_free(struct pair_setup_context *handle)
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
 
-  srp_user_free(sctx->user);
+  srp_user_free(sctx->fruitUser);
 
   free(sctx->pkB);
   free(sctx->M2);
@@ -555,7 +558,7 @@ client_setup_request1(size_t *len, struct pair_setup_context *handle)
   uint32_t uint32;
   char *data = NULL; // Necessary to initialize because plist_to_bin() uses value
 
-  sctx->user = srp_user_new(HASH_SHA1, SRP_NG_2048, USERNAME, (unsigned char *)sctx->pin, strlen(sctx->pin), 0, 0);
+  sctx->fruitUser = srp_user_new(HASH_SHA1, SRP_NG_2048, USERNAME, (unsigned char *)sctx->pin, strlen(sctx->pin), 0, 0);
 
   dict = plist_new_dict();
 
@@ -583,10 +586,10 @@ client_setup_request2(size_t *len, struct pair_setup_context *handle)
   char *data = NULL;
 
   // Calculate A
-  srp_user_start_authentication(sctx->user, &auth_username, &sctx->pkA, &sctx->pkA_len);
+  srp_user_start_authentication(sctx->fruitUser, &auth_username, &sctx->pkA, &sctx->pkA_len);
 
   // Calculate M1 (client proof)
-  srp_user_process_challenge(sctx->user, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
+  srp_user_process_challenge(sctx->fruitUser, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
 
   pk = plist_new_data((char *)sctx->pkA, sctx->pkA_len);
   proof = plist_new_data((char *)sctx->M1, sctx->M1_len);
@@ -619,7 +622,7 @@ client_setup_request3(size_t *len, struct pair_setup_context *handle)
   const char *errmsg;
   int ret;
 
-  session_key = srp_user_get_session_key(sctx->user, &session_key_len);
+  session_key = srp_user_get_session_key(sctx->fruitUser, &session_key_len);
   if (!session_key)
     {
       handle->errmsg = "Setup request 3: No valid session key";
@@ -716,8 +719,8 @@ client_setup_response2(struct pair_setup_context *handle, const uint8_t *data, s
   plist_free(dict);
 
   // Check M2
-  srp_user_verify_session(sctx->user, (const unsigned char *)sctx->M2);
-  if (!srp_user_is_authenticated(sctx->user))
+  srp_user_verify_session(sctx->fruitUser, (const unsigned char *)sctx->M2);
+  if (!srp_user_is_authenticated(sctx->fruitUser))
     {
       handle->errmsg = "Setup response 2: Server authentication failed";
       return -1;
@@ -958,25 +961,27 @@ client_verify_response2(struct pair_verify_context *handle, __attribute__((unuse
 }
 
 
+} // namespace fruit
+
 struct pair_definition pair_client_fruit =
 {
-  .pair_setup_new = client_setup_new,
-  .pair_setup_free = client_setup_free,
-  .pair_setup_result = client_setup_result,
+  .pair_setup_new = fruit::client_setup_new,
+  .pair_setup_free = fruit::client_setup_free,
+  .pair_setup_result = fruit::client_setup_result,
 
-  .pair_setup_request1 = client_setup_request1,
-  .pair_setup_request2 = client_setup_request2,
-  .pair_setup_request3 = client_setup_request3,
+  .pair_setup_request1 = fruit::client_setup_request1,
+  .pair_setup_request2 = fruit::client_setup_request2,
+  .pair_setup_request3 = fruit::client_setup_request3,
 
-  .pair_setup_response1 = client_setup_response1,
-  .pair_setup_response2 = client_setup_response2,
-  .pair_setup_response3 = client_setup_response3,
+  .pair_setup_response1 = fruit::client_setup_response1,
+  .pair_setup_response2 = fruit::client_setup_response2,
+  .pair_setup_response3 = fruit::client_setup_response3,
 
-  .pair_verify_new = client_verify_new,
+  .pair_verify_new = fruit::client_verify_new,
 
-  .pair_verify_request1 = client_verify_request1,
-  .pair_verify_request2 = client_verify_request2,
+  .pair_verify_request1 = fruit::client_verify_request1,
+  .pair_verify_request2 = fruit::client_verify_request2,
 
-  .pair_verify_response1 = client_verify_response1,
-  .pair_verify_response2 = client_verify_response2,
+  .pair_verify_response1 = fruit::client_verify_response1,
+  .pair_verify_response2 = fruit::client_verify_response2,
 };
