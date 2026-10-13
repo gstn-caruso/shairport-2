@@ -2,6 +2,11 @@
 #define __PAIR_AP_TLV_H__
 
 #include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define PAIR_TLV_ERROR_MEMORY -1
 #define PAIR_TLV_ERROR_INSUFFICIENT_SIZE -2
@@ -45,6 +50,14 @@ typedef enum {
                                 // request at this time
 } TLVError;
 
+/**
+ * @brief Borrowed view of one ordered value owned by a TLV message.
+ *
+ * The node and its byte storage remain valid until the owning message is
+ * destroyed. Appending values preserves existing node addresses. Callers must
+ * not free, relink or replace the node's storage through this compatibility view.
+ * @see pair_tlv_values
+ */
 typedef struct _tlv {
     struct _tlv *next;
     uint8_t type;
@@ -53,8 +66,42 @@ typedef struct _tlv {
 } pair_tlv_t;
 
 
-typedef struct {
+/**
+ * @brief Owns an ordered HomeKit TLV message and its wire representation rules.
+ *
+ * Add copies input bytes. Find returns the first matching borrowed node. Format
+ * fragments values into chunks of at most 255 bytes, including headers for
+ * empty values, and reports the required size without writing an undersized
+ * buffer. Parse appends values, joining same-type continuation fragments;
+ * failure retains complete values appended before the malformed field.
+ *
+ * C++ callers may use a scoped owner; copying and moving are disabled to prevent
+ * shared ownership of the node chain. C callers create and destroy owners with
+ * pair_tlv_new() and pair_tlv_free(). The public head is a compatibility view of
+ * the same single-pointer layout, subject to the borrowed-node contract.
+ *
+ * @note Callers must serialize access and keep borrowed views within the owner's
+ * lifetime. Methods preserve the C error-code contract and allocate node/value
+ * storage with malloc/free; the owner itself must be destroyed through its C++
+ * lifetime or pair_tlv_free(), never free().
+ * @see pair_tlv_t
+ */
+typedef struct pair_tlv_values {
+#ifdef __cplusplus
+    pair_tlv_values() noexcept : head(nullptr) {}
+    ~pair_tlv_values();
+    pair_tlv_values(const pair_tlv_values &) = delete;
+    pair_tlv_values &operator=(const pair_tlv_values &) = delete;
+    int add(uint8_t type, const uint8_t *value, size_t size);
+    pair_tlv_t *find(uint8_t type) const;
+    int format(uint8_t *buffer, size_t *size) const;
+    int parse(const uint8_t *buffer, size_t length);
+#endif
     pair_tlv_t *head;
+#ifdef __cplusplus
+private:
+    int appendOwned(uint8_t type, uint8_t *value, size_t size);
+#endif
 } pair_tlv_values_t;
 
 
@@ -72,6 +119,10 @@ int pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *valu
 
 #ifdef DEBUG_PAIR
 void pair_tlv_debug(const pair_tlv_values_t *values);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif  /* !__PAIR_AP_TLV_H__ */

@@ -37,6 +37,8 @@
 
 #include "pair-internal.h"
 
+namespace fruit {
+
 /* ----------------------------- DEFINES ETC ------------------------------- */
 
 #define USERNAME "12:34:56:78:90:AB"
@@ -63,6 +65,16 @@ typedef struct
   int N_len;
 } NGConstant;
 
+/**
+ * @brief Owns the client-side SRP state used by the Fruit pairing protocol.
+ *
+ * The group, big numbers, credentials and allocated public value belong to this
+ * state and are released by srp_user_free(). Proof and session-key views returned
+ * by SRP helpers borrow its inline storage. Fruit derives a double-length session
+ * key, so this type is distinct from HomeKit's SRP user despite similar fields.
+ * @note The setup context controls lifetime and serializes SRP operations.
+ * @see pair_client_setup_context
+ */
 struct SRPUser
 {
   enum hash_alg     alg;
@@ -112,7 +124,7 @@ static struct NGHex global_Ng_constants[] =
 static NGConstant *
 new_ng(SRP_NGType ng_type, const char *n_hex, const char *g_hex)
 {
-  NGConstant *ng = calloc(1, sizeof(NGConstant));
+  NGConstant *ng = static_cast<NGConstant *>(calloc(1, sizeof(NGConstant)));
 
   if ( ng_type != SRP_NG_CUSTOM )
     {
@@ -158,7 +170,7 @@ static int
 hash_session_key(enum hash_alg alg, const bnum n, unsigned char *dest)
 {
   int           nbytes = bnum_num_bytes(n);
-  unsigned char *bin   = malloc(nbytes);
+  unsigned char *bin   = static_cast<uint8_t *>(malloc(nbytes));
   unsigned char fourbytes[4] = { 0 }; // Only God knows the reason for this, and perhaps some poor soul at Apple
 
   bnum_bn2bin(n, bin, nbytes);
@@ -225,7 +237,7 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
              const unsigned char *bytes_password, int len_password,
              const char *n_hex, const char *g_hex)
 {
-  struct SRPUser  *usr  = calloc(1, sizeof(struct SRPUser));
+  struct SRPUser  *usr  = static_cast<SRPUser *>(calloc(1, sizeof(struct SRPUser)));
   int              ulen = strlen(username) + 1;
 
   if (!usr)
@@ -241,8 +253,8 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   if (!usr->ng || !usr->a || !usr->A || !usr->S)
     goto err_exit;
 
-  usr->username     = malloc(ulen);
-  usr->password     = malloc(len_password);
+  usr->username     = static_cast<char *>(malloc(ulen));
+  usr->password     = static_cast<uint8_t *>(malloc(len_password));
   usr->password_len = len_password;
 
   if (!usr->username || !usr->password)
@@ -320,7 +332,7 @@ srp_user_start_authentication(struct SRPUser *usr, const char **username,
   bnum_modexp(usr->A, usr->ng->g, usr->a, usr->ng->N);
 
   *len_A   = bnum_num_bytes(usr->A);
-  *bytes_A = malloc(*len_A);
+  *bytes_A = static_cast<uint8_t *>(malloc(*len_A));
 
   if (!*bytes_A)
     {
@@ -516,6 +528,7 @@ static int
 client_setup_new(struct pair_setup_context *handle, const char *pin, __attribute__((unused)) pair_cb add_cb, __attribute__((unused)) void *cb_arg, __attribute__((unused)) const char *device_id)
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
+  sctx->fruitUser = nullptr;
 
   if (!is_initialized())
     return -1;
@@ -535,7 +548,7 @@ client_setup_free(struct pair_setup_context *handle)
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
 
-  srp_user_free(sctx->user);
+  srp_user_free(sctx->fruitUser);
 
   free(sctx->pkB);
   free(sctx->M2);
@@ -555,7 +568,7 @@ client_setup_request1(size_t *len, struct pair_setup_context *handle)
   uint32_t uint32;
   char *data = NULL; // Necessary to initialize because plist_to_bin() uses value
 
-  sctx->user = srp_user_new(HASH_SHA1, SRP_NG_2048, USERNAME, (unsigned char *)sctx->pin, strlen(sctx->pin), 0, 0);
+  sctx->fruitUser = srp_user_new(HASH_SHA1, SRP_NG_2048, USERNAME, (unsigned char *)sctx->pin, strlen(sctx->pin), 0, 0);
 
   dict = plist_new_dict();
 
@@ -583,10 +596,10 @@ client_setup_request2(size_t *len, struct pair_setup_context *handle)
   char *data = NULL;
 
   // Calculate A
-  srp_user_start_authentication(sctx->user, &auth_username, &sctx->pkA, &sctx->pkA_len);
+  srp_user_start_authentication(sctx->fruitUser, &auth_username, &sctx->pkA, &sctx->pkA_len);
 
   // Calculate M1 (client proof)
-  srp_user_process_challenge(sctx->user, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
+  srp_user_process_challenge(sctx->fruitUser, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
 
   pk = plist_new_data((char *)sctx->pkA, sctx->pkA_len);
   proof = plist_new_data((char *)sctx->M1, sctx->M1_len);
@@ -619,7 +632,7 @@ client_setup_request3(size_t *len, struct pair_setup_context *handle)
   const char *errmsg;
   int ret;
 
-  session_key = srp_user_get_session_key(sctx->user, &session_key_len);
+  session_key = srp_user_get_session_key(sctx->fruitUser, &session_key_len);
   if (!session_key)
     {
       handle->errmsg = "Setup request 3: No valid session key";
@@ -716,8 +729,8 @@ client_setup_response2(struct pair_setup_context *handle, const uint8_t *data, s
   plist_free(dict);
 
   // Check M2
-  srp_user_verify_session(sctx->user, (const unsigned char *)sctx->M2);
-  if (!srp_user_is_authenticated(sctx->user))
+  srp_user_verify_session(sctx->fruitUser, (const unsigned char *)sctx->M2);
+  if (!srp_user_is_authenticated(sctx->fruitUser))
     {
       handle->errmsg = "Setup response 2: Server authentication failed";
       return -1;
@@ -841,7 +854,7 @@ client_verify_request1(size_t *len, struct pair_verify_context *handle)
     }
 
   *len = 4 + sizeof(vctx->client_eph_public_key) + sizeof(vctx->client_public_key);
-  data = calloc(1, *len);
+  data = static_cast<uint8_t *>(calloc(1, *len));
   if (!data)
     {
       handle->errmsg = "Verify request 1: Out of memory";
@@ -869,7 +882,7 @@ client_verify_request2(size_t *len, struct pair_verify_context *handle)
   const char *errmsg;
 
   *len = sizeof(vctx->client_eph_public_key) + sizeof(vctx->server_eph_public_key);
-  data = calloc(1, *len);
+  data = static_cast<uint8_t *>(calloc(1, *len));
   if (!data)
     {
       handle->errmsg = "Verify request 2: Out of memory";
@@ -912,7 +925,7 @@ client_verify_request2(size_t *len, struct pair_verify_context *handle)
     }
 
   *len = 4 + sizeof(vctx->server_fruit_public_key);
-  data = calloc(1, *len);
+  data = static_cast<uint8_t *>(calloc(1, *len));
   if (!data)
     {
       handle->errmsg = "Verify request 2: Out of memory";
@@ -958,25 +971,27 @@ client_verify_response2(struct pair_verify_context *handle, __attribute__((unuse
 }
 
 
+} // namespace fruit
+
 struct pair_definition pair_client_fruit =
 {
-  .pair_setup_new = client_setup_new,
-  .pair_setup_free = client_setup_free,
-  .pair_setup_result = client_setup_result,
+  .pair_setup_new = fruit::client_setup_new,
+  .pair_setup_free = fruit::client_setup_free,
+  .pair_setup_result = fruit::client_setup_result,
 
-  .pair_setup_request1 = client_setup_request1,
-  .pair_setup_request2 = client_setup_request2,
-  .pair_setup_request3 = client_setup_request3,
+  .pair_setup_request1 = fruit::client_setup_request1,
+  .pair_setup_request2 = fruit::client_setup_request2,
+  .pair_setup_request3 = fruit::client_setup_request3,
 
-  .pair_setup_response1 = client_setup_response1,
-  .pair_setup_response2 = client_setup_response2,
-  .pair_setup_response3 = client_setup_response3,
+  .pair_setup_response1 = fruit::client_setup_response1,
+  .pair_setup_response2 = fruit::client_setup_response2,
+  .pair_setup_response3 = fruit::client_setup_response3,
 
-  .pair_verify_new = client_verify_new,
+  .pair_verify_new = fruit::client_verify_new,
 
-  .pair_verify_request1 = client_verify_request1,
-  .pair_verify_request2 = client_verify_request2,
+  .pair_verify_request1 = fruit::client_verify_request1,
+  .pair_verify_request2 = fruit::client_verify_request2,
 
-  .pair_verify_response1 = client_verify_response1,
-  .pair_verify_response2 = client_verify_response2,
+  .pair_verify_response1 = fruit::client_verify_response1,
+  .pair_verify_response2 = fruit::client_verify_response2,
 };

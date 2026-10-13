@@ -79,6 +79,20 @@ protected:
   }
 };
 
+TEST_F(PairingSessionNative, FruitSetupReturnsAnOwnedBinaryPlistAfterContextRelease) {
+  client.reset(pair_setup_new(PAIR_CLIENT_FRUIT, "1234", nullptr, nullptr, "fruit-client"));
+  ASSERT_TRUE(client);
+  size_t length = 0;
+  std::unique_ptr<uint8_t, decltype(&std::free)> request(
+      pair_setup_request1(&length, client.get()), std::free);
+  ASSERT_TRUE(request);
+  ASSERT_GT(length, 8);
+
+  client.reset();
+
+  EXPECT_EQ(std::string_view(reinterpret_cast<const char *>(request.get()), 8), "bplist00");
+}
+
 TEST_F(PairingSessionNative, TransientSetupPreparesControlThenEventAndOwnsReplyBytes) {
   auto reply = exchange(true); auto retained = reply.body;
   ASSERT_TRUE(server.controlChannel().prepared()); ASSERT_TRUE(server.eventChannel().prepared());

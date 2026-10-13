@@ -19,7 +19,8 @@ user's session; the timing companion and Avahi run as system services.
 
 Requirements: Linux, CMake 4.2+, Ninja, pinned Clang 23.1.3, matching
 `clang-scan-deps`, libstdc++ 15 and GoogleTest 1.17+ for tests. Production sources
-use C++26; the embedded pairing dependency retains a C linkage boundary.
+use C++26, including the embedded pairing library, whose public API retains a
+C linkage boundary.
 Install the asdf compiler and dependencies from the repository root:
 
 ```sh
@@ -178,6 +179,21 @@ Pairing lifetime contracts are documented at
 [PairingSession](src/session/pairing_session.hpp) and
 [EncryptedChannel](src/transport/encrypted_channel.hpp).
 Source authorship/license notices remain in the pairing library.
+
+All production translation units, including `pair_ap/`, compile as C++26. The
+seven remaining `.c` files are tests and fixtures: three exercise C-compatible
+receiver APIs (`rtsp_message_c_test.c`, `string_utilities_test.c` and
+`structured_buffer_test.c`), one checks activity-monitor lifecycle behavior
+(`activity_monitor_test.c`), and three provide native daemon/companion fixtures
+(`daemon_services_fixture.c`, `daemon_startup_fixture.c` and `nqptp_fixture.c`).
+They intentionally continue to compile as C to validate those native boundaries.
+
+The pairing TLV message now owns its values and implements append, lookup,
+fragmentation and parsing itself. C++ callers can use scoped
+[`pair_tlv_values`](pair_ap/pair-tlv.h) owners; C callers retain the allocation,
+error-code and borrowed-node API through thin compatibility functions. Class
+comments use Doxygen's `/** ... */` syntax to describe ownership, state and
+serialization contracts in the complex pairing objects.
 
 For short feedback cycles, build a relevant target and select named scenarios:
 

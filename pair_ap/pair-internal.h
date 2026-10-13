@@ -8,12 +8,21 @@
   do { handle->status = (s); handle->errmsg = (m); goto error; } while(0)
 
 
+namespace fruit {
+struct SRPUser;
+}
+namespace homekit {
 struct SRPUser;
 struct SRPVerifier;
+}
 
 struct pair_client_setup_context
 {
-  struct SRPUser *user;
+  union
+  {
+    fruit::SRPUser *fruitUser;
+    homekit::SRPUser *homekitUser;
+  };
 
   char *pin;
   char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
@@ -48,7 +57,7 @@ struct pair_client_setup_context
 
 struct pair_server_setup_context
 {
-  struct SRPVerifier *verifier;
+  homekit::SRPVerifier *verifier;
 
   char *pin;
   char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
@@ -91,9 +100,24 @@ enum pair_status
   PAIR_STATUS_INVALID,
 };
 
+/**
+ * @brief Holds one role-specific pairing setup exchange and its result.
+ *
+ * The immutable protocol definition selects client or server state in sctx and
+ * performs the SRP exchange. Its cleanup hook releases role-owned allocations;
+ * SRP-derived borrowed pointers are valid only while that SRP state exists.
+ * Result pointers and formatted key strings returned by the C API refer to this
+ * context and expire at pair_setup_free(). Request/response wire buffers returned
+ * by the API are separate malloc allocations owned by the caller.
+ *
+ * @note Create and destroy through pair_setup_new()/pair_setup_free(). Callback
+ * arguments are borrowed. Callers serialize exchange operations and destruction;
+ * the context has no internal synchronization.
+ * @see PairingSession
+ */
 struct pair_setup_context
 {
-  struct pair_definition *type;
+  const struct pair_definition *type;
 
   enum pair_status status;
   const char *errmsg;
@@ -153,9 +177,23 @@ struct pair_server_verify_context
   uint8_t shared_secret[crypto_scalarmult_BYTES]; // 32
 };
 
+/**
+ * @brief Holds one role-specific identity verification exchange.
+ *
+ * The protocol definition selects the active vctx role, tracks authentication
+ * status and fills the shared-secret result. Identity and ephemeral keys live in
+ * this context; result pointers returned by the C API are borrowed until
+ * pair_verify_free(). Returned wire buffers are caller-owned malloc allocations.
+ *
+ * @note Use pair_verify_new()/pair_verify_free() for lifetime management. Callback
+ * arguments are borrowed; callers serialize operations and destruction. Release
+ * follows the existing protocol cleanup hooks and does not promise secure
+ * erasure of all inline key storage.
+ * @see pair_setup_context
+ */
 struct pair_verify_context
 {
-  struct pair_definition *type;
+  const struct pair_definition *type;
 
   enum pair_status status;
   const char *errmsg;
@@ -169,9 +207,23 @@ struct pair_verify_context
   } vctx;
 };
 
+/**
+ * @brief Holds directional stream keys and frame nonce counters for one channel.
+ *
+ * The selected protocol derives encryption/decryption keys from the negotiated
+ * secret and channel salt. Each direction has a counter plus the snapshot used
+ * by the C rollback operation for the most recent encrypt/decrypt call. Encrypted
+ * and plaintext outputs are malloc allocations released by their caller.
+ *
+ * @note Use pair_cipher_new()/pair_cipher_free() for lifetime management and
+ * serialize cipher operations, rollback and destruction. Rollback restores
+ * counters only; it does not undo external IO. The context does not synchronize
+ * access or promise secure erasure of its inline keys when freed.
+ * @see EncryptedChannel
+ */
 struct pair_cipher_context
 {
-  struct pair_definition *type;
+  const struct pair_definition *type;
 
   uint8_t encryption_key[32];
   uint8_t decryption_key[32];
@@ -186,6 +238,14 @@ struct pair_cipher_context
   const char *errmsg;
 };
 
+/**
+ * @brief Dispatches the supported operations for one pairing protocol and role.
+ *
+ * Definitions have static lifetime and are borrowed by setup, verify and cipher
+ * contexts. Null callbacks mark operations unsupported by that role. The table
+ * keeps protocol selection at the C boundary while each implementation owns its
+ * exchange rules and resource cleanup.
+ */
 struct pair_definition
 {
   int (*pair_setup_new)(struct pair_setup_context *sctx, const char *pin, pair_cb add_cb, void *cb_arg, const char *device_id);
@@ -214,7 +274,7 @@ struct pair_definition
   int (*pair_remove)(uint8_t **out, size_t *out_len, pair_cb cb, void *cb_arg, const uint8_t *in, size_t in_len);
   int (*pair_list)(uint8_t **out, size_t *out_len, pair_list_cb cb, void *cb_arg, const uint8_t *in, size_t in_len);
 
-  struct pair_cipher_context *(*pair_cipher_new)(struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *dynamic_salt_suffix);
+  struct pair_cipher_context *(*pair_cipher_new)(const struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *dynamic_salt_suffix);
   void (*pair_cipher_free)(struct pair_cipher_context *cctx);
 
   ssize_t (*pair_encrypt)(uint8_t **ciphertext, size_t *ciphertext_len, const uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);

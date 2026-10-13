@@ -28,14 +28,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <new>
 
 #include "pair-tlv.h"
 #include "pair-internal.h"
 
 
-static int
-tlv_add_value_(pair_tlv_values_t *values, uint8_t type, uint8_t *value, size_t size) {
-    pair_tlv_t *tlv = malloc(sizeof(pair_tlv_t));
+int
+pair_tlv_values::appendOwned(uint8_t type, uint8_t *value, size_t size) {
+    pair_tlv_t *tlv = static_cast<pair_tlv_t *>(malloc(sizeof(pair_tlv_t)));
     if (!tlv) {
         return PAIR_TLV_ERROR_MEMORY;
     }
@@ -44,10 +45,10 @@ tlv_add_value_(pair_tlv_values_t *values, uint8_t type, uint8_t *value, size_t s
     tlv->value = value;
     tlv->next = NULL;
 
-    if (!values->head) {
-        values->head = tlv;
+    if (!head) {
+        head = tlv;
     } else {
-        pair_tlv_t *t = values->head;
+        pair_tlv_t *t = head;
         while (t->next) {
             t = t->next;
         }
@@ -58,22 +59,8 @@ tlv_add_value_(pair_tlv_values_t *values, uint8_t type, uint8_t *value, size_t s
 }
 
 
-pair_tlv_values_t *
-pair_tlv_new() {
-    pair_tlv_values_t *values = malloc(sizeof(pair_tlv_values_t));
-    if (!values)
-        return NULL;
-
-    values->head = NULL;
-    return values;
-}
-
-void
-pair_tlv_free(pair_tlv_values_t *values) {
-    if (!values)
-        return;
-
-    pair_tlv_t *t = values->head;
+pair_tlv_values::~pair_tlv_values() {
+    pair_tlv_t *t = head;
     while (t) {
         pair_tlv_t *t2 = t;
         t = t->next;
@@ -81,29 +68,28 @@ pair_tlv_free(pair_tlv_values_t *values) {
             free(t2->value);
         free(t2);
     }
-    free(values);
 }
 
 int
-pair_tlv_add_value(pair_tlv_values_t *values, uint8_t type, const uint8_t *value, size_t size) {
+pair_tlv_values::add(uint8_t type, const uint8_t *value, size_t size) {
     uint8_t *data = NULL;
     int ret;
     if (size) {
-        data = malloc(size);
+        data = static_cast<uint8_t *>(malloc(size));
         if (!data) {
             return PAIR_TLV_ERROR_MEMORY;
         }
         memcpy(data, value, size);
     }
-    ret = tlv_add_value_(values, type, data, size);
+    ret = appendOwned(type, data, size);
     if (ret < 0)
         free(data);
     return ret;
 }
 
 pair_tlv_t *
-pair_tlv_get_value(const pair_tlv_values_t *values, uint8_t type) {
-    pair_tlv_t *t = values->head;
+pair_tlv_values::find(uint8_t type) const {
+    pair_tlv_t *t = head;
     while (t) {
         if (t->type == type)
             return t;
@@ -113,9 +99,9 @@ pair_tlv_get_value(const pair_tlv_values_t *values, uint8_t type) {
 }
 
 int
-pair_tlv_format(const pair_tlv_values_t *values, uint8_t *buffer, size_t *size) {
+pair_tlv_values::format(uint8_t *buffer, size_t *size) const {
     size_t required_size = 0;
-    pair_tlv_t *t = values->head;
+    pair_tlv_t *t = head;
     while (t) {
         required_size += t->size + 2 * (t->size == 0 ? 1 : (t->size + 254) / 255);
         t = t->next;
@@ -128,7 +114,7 @@ pair_tlv_format(const pair_tlv_values_t *values, uint8_t *buffer, size_t *size) 
 
     *size = required_size;
 
-    t = values->head;
+    t = head;
     while (t) {
         uint8_t *data = t->value;
         if (!t->size) {
@@ -158,7 +144,7 @@ pair_tlv_format(const pair_tlv_values_t *values, uint8_t *buffer, size_t *size) 
 }
 
 int
-pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *values) {
+pair_tlv_values::parse(const uint8_t *buffer, size_t length) {
     size_t i = 0;
     int ret;
     while (i < length) {
@@ -183,7 +169,7 @@ pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *values) 
 
         // allocate memory to hold all pieces of chunked data and copy data there
         if (size != 0) {
-            data = malloc(size);
+            data = static_cast<uint8_t *>(malloc(size));
             if (!data)
                 return PAIR_TLV_ERROR_MEMORY;
 
@@ -209,7 +195,7 @@ pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *values) 
             i += 2;
         }
 
-        ret = tlv_add_value_(values, type, data, size);
+        ret = appendOwned(type, data, size);
         if (ret < 0) {
             free(data);
             return ret;
@@ -217,6 +203,30 @@ pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *values) 
     }
 
     return 0;
+}
+
+pair_tlv_values_t *pair_tlv_new() {
+    return new (std::nothrow) pair_tlv_values;
+}
+
+void pair_tlv_free(pair_tlv_values_t *values) {
+    delete values;
+}
+
+int pair_tlv_add_value(pair_tlv_values_t *values, uint8_t type, const uint8_t *value, size_t size) {
+    return values->add(type, value, size);
+}
+
+pair_tlv_t *pair_tlv_get_value(const pair_tlv_values_t *values, uint8_t type) {
+    return values->find(type);
+}
+
+int pair_tlv_format(const pair_tlv_values_t *values, uint8_t *buffer, size_t *size) {
+    return values->format(buffer, size);
+}
+
+int pair_tlv_parse(const uint8_t *buffer, size_t length, pair_tlv_values_t *values) {
+    return values->parse(buffer, length);
 }
 
 #ifdef DEBUG_PAIR

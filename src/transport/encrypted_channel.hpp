@@ -23,8 +23,23 @@ public:
   virtual void encryptFailed(std::string_view message) = 0;
 };
 
-// Callers serialize IO and release; read/write require a prepared channel.
-// IO and diagnostic callbacks must not reenter or retain borrowed views.
+/**
+ * @brief Owns a stream cipher and the buffers needed for framed encrypted IO.
+ *
+ * Reads retain incomplete encrypted frames and plaintext that did not fit the
+ * caller's buffer. Writes encrypt the supplied bytes and handle partial native
+ * writes until the frame is sent or IO fails. Native cipher outputs are copied
+ * or released within the operation; input and output spans remain borrowed.
+ *
+ * Prepare releases the previous cipher and buffers before creating a new cipher,
+ * so a failed preparation leaves the channel unprepared. Release is repeatable
+ * and also resets the response-encryption flag used by protocol adapters.
+ *
+ * @note Read and write require a prepared channel. Callers must serialize IO,
+ * preparation and release. IO and diagnostic callbacks must not reenter the
+ * channel or retain borrowed spans; this object provides no synchronization.
+ * @see PairingSession
+ */
 class EncryptedChannel {
 public:
   EncryptedChannel() = default;
