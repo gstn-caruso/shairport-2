@@ -140,4 +140,17 @@ TEST_F(RtspParameters, ImageUnknownAndMissingTypesApplyNoVolumes) {
     EXPECT_EQ(volume.current, AirPlayVolume{-24});
   }
 }
+
+TEST_F(RtspParameters, MetadataRejectsTruncatedItemsAndTrailingBytes) {
+  request.addHeader("Content-Type", "application/x-dmap-tagged");
+  const char truncated[] = {'m', 'l', 'i', 't', 0, 0, 0, 8, 'm', 'i', 'n', 'm', 0, 0, 0, 1};
+  const char trailing[] = {'m', 'l', 'i', 't', 0, 0, 0, 9, 'm', 'i', 'n', 'm', 0, 0, 0, 0, 'x'};
+  for (auto body : {std::string_view(truncated, sizeof(truncated)),
+                    std::string_view(trailing, sizeof(trailing))}) {
+    request.replaceBody(body);
+    EXPECT_EQ(handler.set(request, response).content, ParameterContent::metadata);
+    EXPECT_EQ(response.responseCode(), 400);
+  }
+  EXPECT_TRUE(volume.accepted.empty());
+}
 }

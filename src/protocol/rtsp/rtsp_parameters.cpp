@@ -1,6 +1,7 @@
 module;
 #include "protocol/rtsp/rtsp_message.hpp"
 #include "protocol/rtsp/parameter_body.hpp"
+#include "protocol/rtsp/tagged_metadata_body.hpp"
 #include "volume/volume_quantities.hpp"
 #include <format>
 #include <optional>
@@ -29,7 +30,7 @@ ParameterDiagnostics RtspParameterHandler::set(const RtspMessage &request, RtspM
   }
   const std::string_view type(contentType);
   if (type.starts_with("application/x-dmap-tagged")) {
-    response.respondWith(request.containsCompleteMetadata() ? 200 : 400);
+    response.respondWith(TaggedMetadataBody(request.bodyText()).isComplete() ? 200 : 400);
     return {ParameterContent::metadata, {}};
   }
   if (type.starts_with("image/")) {
