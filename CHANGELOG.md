@@ -1,3 +1,24 @@
+## [7.0.1](https://github.com/gstn-caruso/shairport-2/compare/v7.0.0...v7.0.1) (2026-10-13)
+
+### Bug Fixes
+
+* **rtsp:** log bounded parameter diagnostics for error analysis ([#81](https://github.com/gstn-caruso/shairport-2/issues/81)) ([ecae609](https://github.com/gstn-caruso/shairport-2/commit/ecae609d8d4d0a0bf35dc1cf746e3b55d8f50478))
+
+### Documentation
+
+* consolidate operational guidance in the README ([#82](https://github.com/gstn-caruso/shairport-2/issues/82)) ([721b384](https://github.com/gstn-caruso/shairport-2/commit/721b3847ebc91ec1639769ff5ddd7062bef1096c))
+
+### Code Refactoring
+
+* **rtsp:** encapsulate ordered header invariants ([#80](https://github.com/gstn-caruso/shairport-2/issues/80)) ([6887b9d](https://github.com/gstn-caruso/shairport-2/commit/6887b9d7565ddc8137568dfe602ff742a7355949))
+* **rtsp:** give parameter bodies their own line cursor ([8b310d1](https://github.com/gstn-caruso/shairport-2/commit/8b310d1c3fd9f3c43b0c357fc47f018ddda8d6d2))
+* **rtsp:** let tagged metadata validate its own framing ([#79](https://github.com/gstn-caruso/shairport-2/issues/79)) ([657701e](https://github.com/gstn-caruso/shairport-2/commit/657701e31edaa389bcf78f681ccc5c20c0133b34))
+
+### Continuous Integration
+
+* simplify builds and describe validation checks ([#76](https://github.com/gstn-caruso/shairport-2/issues/76)) ([07d4958](https://github.com/gstn-caruso/shairport-2/commit/07d4958ac6e309848ac263a3eb1f5421d8999cea))
+* update action runtimes and pin Ubuntu runner hosts ([#77](https://github.com/gstn-caruso/shairport-2/issues/77)) ([1620d1f](https://github.com/gstn-caruso/shairport-2/commit/1620d1f060b9431a3e89bc3962e3da330dfdd844))
+
 ## [7.0.0](https://github.com/gstn-caruso/shairport-2/compare/v6.1.17...v7.0.0) (2026-10-11)
 
 ### ⚠ BREAKING CHANGES
