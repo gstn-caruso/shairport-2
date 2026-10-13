@@ -73,6 +73,15 @@ TEST_F(RtspParameters, MalformedVolumeIsAcceptedAsZero) {
   EXPECT_EQ(volume.accepted, std::vector{AirPlayVolume{0}});
 }
 
+TEST_F(RtspParameters, MixedLineSeparatorsPreserveEmptyUnknownLines) {
+  request.addHeader("Content-Type", "text/parameters");
+  request.replaceBody("\r\nvolume: -20\rprogress: 0/1/2\n\nunknown\r\nvolume: -10");
+  const auto diagnostics = handler.set(request, response);
+  EXPECT_EQ(diagnostics.unrecognizedParameters, (std::vector<std::string>{"", "", "unknown"}));
+  EXPECT_EQ(volume.accepted, (std::vector{AirPlayVolume{-20}, AirPlayVolume{-10}}));
+  EXPECT_EQ(response.responseCode(), 200);
+}
+
 TEST_F(RtspParameters, WireVolumeAcceptsWhitespaceAndTrailingText) {
   request.addHeader("Content-Type", "text/parameters");
   request.replaceBody("volume:   -12.5remaining\r\n");

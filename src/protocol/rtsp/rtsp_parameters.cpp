@@ -1,5 +1,6 @@
 module;
 #include "protocol/rtsp/rtsp_message.hpp"
+#include "protocol/rtsp/parameter_body.hpp"
 #include "volume/volume_quantities.hpp"
 #include <format>
 #include <optional>
@@ -12,7 +13,7 @@ module receiver.protocol.rtsp.parameters;
 std::optional<AirPlayVolume> RtspParameterHandler::get(const RtspMessage &request,
                                                       RtspMessage &response) {
   std::optional<AirPlayVolume> requestedVolume;
-  if (request.requestsVolume()) {
+  if (ParameterBody(request.bodyText()).requestsVolume()) {
     requestedVolume = volume_.suggestedVolume();
     response.replaceBody(std::format("\r\nvolume: {:.6f}\r\n", requestedVolume->value()));
   }
@@ -40,11 +41,13 @@ ParameterDiagnostics RtspParameterHandler::set(const RtspMessage &request, RtspM
     return {ParameterContent::unknown, {}};
   }
   ParameterDiagnostics diagnostics{ParameterContent::text, {}};
-  for (const auto &parameter : request.parameterLines()) {
-    if (parameter.starts_with("volume: "))
-      volume_.acceptVolume(AirPlayVolume::fromWireParameter(parameter.c_str() + 8));
-    else if (!parameter.starts_with("progress: "))
-      diagnostics.unrecognizedParameters.push_back(parameter);
+  ParameterBody parameters(request.bodyText());
+  while (auto parameter = parameters.nextLine()) {
+    if (parameter->starts_with("volume: ")) {
+      const std::string value(parameter->substr(8));
+      volume_.acceptVolume(AirPlayVolume::fromWireParameter(value.c_str()));
+    } else if (!parameter->starts_with("progress: "))
+      diagnostics.unrecognizedParameters.emplace_back(*parameter);
   }
   response.respondWith(200);
   return diagnostics;

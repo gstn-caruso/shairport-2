@@ -1,4 +1,5 @@
 #include "protocol/rtsp/rtsp_message.hpp"
+#include "protocol/rtsp/parameter_body.hpp"
 #include <gtest/gtest.h>
 #include <string>
 
@@ -94,8 +95,9 @@ TEST(RtspMessage, CompleteMetadataReplacesAnIncompleteContainer) {
   EXPECT_TRUE(metadata.containsCompleteMetadata());
 }
 
-TEST(RtspMessage, ParameterLinesPreserveVolumeAndProgressValues) {
-  RtspMessage metadata;
-  metadata.replaceBody("volume: -15.0\r\nprogress: 0/1/2\r\n");
-  EXPECT_EQ(metadata.parameterLines(), std::vector<std::string>({"volume: -15.0", "progress: 0/1/2"}));
+TEST(ParameterBody, LinesPreserveVolumeAndProgressValues) {
+  ParameterBody parameters("volume: -15.0\r\nprogress: 0/1/2\r\n");
+  EXPECT_EQ(parameters.nextLine(), "volume: -15.0");
+  EXPECT_EQ(parameters.nextLine(), "progress: 0/1/2");
+  EXPECT_EQ(parameters.nextLine(), std::nullopt);
 }
