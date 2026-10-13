@@ -2,7 +2,7 @@ if(NOT DEFINED ROOT OR NOT DEFINED PREFIX)
   message(FATAL_ERROR "ROOT and PREFIX are required")
 endif()
 foreach(path "bin/shairport-2" "bin/shairport-2-nqptp"
-    "share/man/man1/shairport-2.1" "share/doc/shairport-2/BUILD.md"
+    "share/man/man1/shairport-2.1" "share/doc/shairport-2/README.md"
     "lib/systemd/user/shairport-2.service"
     "lib/systemd/system/shairport-2-nqptp.service")
   if(NOT EXISTS "${ROOT}${PREFIX}/${path}")
