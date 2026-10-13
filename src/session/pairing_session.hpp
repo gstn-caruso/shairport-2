@@ -36,6 +36,7 @@ private:
   std::shared_ptr<const PairingOptions> options_;
   std::unique_ptr<pair_setup_context,decltype(&pair_setup_free)> setup_{nullptr,pair_setup_free};
   std::unique_ptr<pair_verify_context,decltype(&pair_verify_free)> verify_{nullptr,pair_verify_free};
+  // Native result storage belongs to setup_; it expires when that context is released.
   pair_result *setupResult_ = nullptr;
   EncryptedChannel control_,event_,data_;
 };
