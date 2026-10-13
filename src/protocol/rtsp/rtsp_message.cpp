@@ -90,9 +90,6 @@ std::string_view RtspMessage::bodyText() const noexcept { return body_; }
 const char *RtspMessage::bodyData() const noexcept { return body_.c_str(); }
 uint32_t RtspMessage::bodyLength() const noexcept { return static_cast<uint32_t>(body_.size()); }
 bool RtspMessage::bodyStartsWith(std::string_view prefix) const noexcept { return body_.starts_with(prefix); }
-bool RtspMessage::requestsVolume() const noexcept {
-  return body_.size() == 8 && body_.starts_with("volume");
-}
 
 void RtspMessage::respondWith(int code) noexcept { responseCode_ = code; }
 int RtspMessage::responseCode() const noexcept { return responseCode_; }
@@ -144,20 +141,4 @@ bool RtspMessage::containsCompleteMetadata() const noexcept {
     offset += length;
   }
   return offset == body_.size();
-}
-
-std::vector<std::string> RtspMessage::parameterLines() const {
-  std::vector<std::string> lines;
-  std::string_view remaining = body_;
-  while (!remaining.empty()) {
-    auto end = remaining.find_first_of("\r\n");
-    lines.emplace_back(remaining.substr(0, end));
-    if (end == std::string_view::npos)
-      break;
-    auto separator = remaining[end];
-    remaining.remove_prefix(end + 1);
-    if (separator == '\r' && remaining.starts_with('\n'))
-      remaining.remove_prefix(1);
-  }
-  return lines;
 }

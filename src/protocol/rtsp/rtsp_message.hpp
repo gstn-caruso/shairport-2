@@ -28,14 +28,12 @@ public:
   const char *bodyData() const noexcept;
   uint32_t bodyLength() const noexcept;
   bool bodyStartsWith(std::string_view prefix) const noexcept;
-  bool requestsVolume() const noexcept;
   void respondWith(int code) noexcept;
   int responseCode() const noexcept;
   bool hasResponseCode(int code) const noexcept;
   enum class FramingError { headersTooLong = -1, lengthTooLong = -2, bodyTooLong = -3 };
   std::expected<std::string, FramingError> responsePacket() const;
   bool containsCompleteMetadata() const noexcept;
-  std::vector<std::string> parameterLines() const;
 
 private:
   std::string_view responseReason() const noexcept;
