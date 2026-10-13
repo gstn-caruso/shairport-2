@@ -1,5 +1,4 @@
 #include "protocol/rtsp/rtsp_message.hpp"
-#include <cctype>
 #include <array>
 #include <format>
 #include <cstdlib>
@@ -7,16 +6,6 @@
 #include <stdexcept>
 
 namespace {
-bool sameHeaderName(std::string_view left, std::string_view right) noexcept {
-  if (left.size() != right.size())
-    return false;
-  for (std::size_t index = 0; index < left.size(); ++index)
-    if (std::tolower(static_cast<unsigned char>(left[index])) !=
-        std::tolower(static_cast<unsigned char>(right[index])))
-      return false;
-  return true;
-}
-
 std::string_view nextRequestToken(std::string_view &line) noexcept {
   auto first = line.find_first_not_of(' ');
   if (first == std::string_view::npos)
@@ -62,20 +51,16 @@ const char *RtspMessage::methodName() const noexcept { return method_.c_str(); }
 const char *RtspMessage::requestPath() const noexcept { return path_.c_str(); }
 
 bool RtspMessage::addHeader(std::string_view name, std::string_view value) {
-  if (headers_.size() == 16)
-    return false;
-  headers_.push_back({std::string(name), std::string(value)});
-  return true;
+  return headers_.add(name, value);
 }
 
 const char *RtspMessage::headerValue(std::string_view name) const noexcept {
-  for (const auto &header : headers_)
-    if (sameHeaderName(header.name, name))
-      return header.value.c_str();
-  return nullptr;
+  return headers_.valueFor(name);
 }
 
-const std::vector<RtspMessage::Header> &RtspMessage::headers() const noexcept { return headers_; }
+const std::vector<RtspMessage::Header> &RtspMessage::headers() const noexcept {
+  return headers_.inOrder();
+}
 
 void RtspMessage::replaceBody(std::string_view bytes) {
   if (bytes.size() > std::numeric_limits<uint32_t>::max())
@@ -109,7 +94,7 @@ std::string_view RtspMessage::responseReason() const noexcept {
 
 std::expected<std::string, RtspMessage::FramingError> RtspMessage::responsePacket() const {
   auto packet = std::format("RTSP/1.0 {} {}\r\n", responseCode_, responseReason());
-  for (const auto &header : headers_) {
+  for (const auto &header : headers_.inOrder()) {
     packet += std::format("{}: {}\r\n", header.name, header.value);
     if (packet.size() >= 3072)
       return std::unexpected(FramingError::headersTooLong);

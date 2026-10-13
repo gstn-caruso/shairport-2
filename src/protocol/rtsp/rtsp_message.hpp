@@ -1,5 +1,7 @@
 #pragma once
 
+#include "protocol/rtsp/rtsp_headers.hpp"
+
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -9,10 +11,7 @@
 
 class RtspMessage {
 public:
-  struct Header {
-    std::string name;
-    std::string value;
-  };
+  using Header = RtspHeaders::Header;
 
   std::optional<int> readLine(std::string_view line);
   void request(std::string_view method, std::string_view path = "/");
@@ -38,7 +37,7 @@ private:
   std::string_view responseReason() const noexcept;
   std::string method_;
   std::string path_;
-  std::vector<Header> headers_;
+  RtspHeaders headers_;
   std::string body_;
   bool requestLineRead_ = false;
   int responseCode_ = 0;

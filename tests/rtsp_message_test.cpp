@@ -39,6 +39,17 @@ TEST(RtspMessage, SixteenHeadersFitAndTheFollowingHeaderIsRejected) {
   EXPECT_EQ(message.headers().size(), 16);
 }
 
+TEST(RtspMessage, ParsedHeaderOverflowIsIgnoredWithoutRejectingTheRequest) {
+  RtspMessage message;
+  ASSERT_EQ(message.readLine("OPTIONS / RTSP/1.0"), -1);
+  for (int index = 0; index < 16; ++index)
+    EXPECT_EQ(message.readLine("Repeated: value"), -1);
+  EXPECT_EQ(message.readLine("Content-Length: 42"), -1);
+  EXPECT_EQ(message.readLine(""), 0);
+  EXPECT_EQ(message.headerValue("Content-Length"), nullptr);
+  EXPECT_EQ(message.headers().size(), 16);
+}
+
 
 TEST(RtspMessage, OwnedRequestBodyPreservesBorrowedBytesAndSupportsEmptyReplacement) {
   RtspMessage owned;
