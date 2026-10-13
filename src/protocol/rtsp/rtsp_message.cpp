@@ -123,22 +123,3 @@ std::expected<std::string, RtspMessage::FramingError> RtspMessage::responsePacke
     return std::unexpected(FramingError::bodyTooLong);
   return packet;
 }
-
-bool RtspMessage::containsCompleteMetadata() const noexcept {
-  auto readLength = [this](std::size_t offset) {
-    auto byte = [this](std::size_t index) { return static_cast<unsigned char>(body_[index]); };
-    return (uint32_t{byte(offset)} << 24) | (uint32_t{byte(offset + 1)} << 16) |
-           (uint32_t{byte(offset + 2)} << 8) | uint32_t{byte(offset + 3)};
-  };
-  if (body_.size() < 8 || readLength(4) != body_.size() - 8)
-    return false;
-  std::size_t offset = 8;
-  while (body_.size() - offset >= 8) {
-    auto length = readLength(offset + 4);
-    offset += 8;
-    if (length > body_.size() - offset)
-      return false;
-    offset += length;
-  }
-  return offset == body_.size();
-}

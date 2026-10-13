@@ -33,7 +33,6 @@ public:
   bool hasResponseCode(int code) const noexcept;
   enum class FramingError { headersTooLong = -1, lengthTooLong = -2, bodyTooLong = -3 };
   std::expected<std::string, FramingError> responsePacket() const;
-  bool containsCompleteMetadata() const noexcept;
 
 private:
   std::string_view responseReason() const noexcept;

@@ -1,5 +1,6 @@
 #include "protocol/rtsp/rtsp_message.hpp"
 #include "protocol/rtsp/parameter_body.hpp"
+#include "protocol/rtsp/tagged_metadata_body.hpp"
 #include <gtest/gtest.h>
 #include <string>
 
@@ -85,14 +86,11 @@ TEST(RtspMessage, OversizedResponseBodyReturnsAFramingError) {
   EXPECT_EQ(packet.error(), RtspMessage::FramingError::bodyTooLong);
 }
 
-TEST(RtspMessage, CompleteMetadataReplacesAnIncompleteContainer) {
-  RtspMessage metadata;
+TEST(TaggedMetadataBody, CompleteMetadataReplacesAnIncompleteContainer) {
   const char invalidMetadata[] = {'m', 'l', 'i', 't', 0, 0, 0, 20};
-  metadata.replaceBody(std::string_view(invalidMetadata, sizeof(invalidMetadata)));
-  EXPECT_FALSE(metadata.containsCompleteMetadata());
+  EXPECT_FALSE(TaggedMetadataBody({invalidMetadata, sizeof(invalidMetadata)}).isComplete());
   const char validMetadata[] = {'m', 'l', 'i', 't', 0, 0, 0, 8, 'm', 'i', 'n', 'm', 0, 0, 0, 0};
-  metadata.replaceBody(std::string_view(validMetadata, sizeof(validMetadata)));
-  EXPECT_TRUE(metadata.containsCompleteMetadata());
+  EXPECT_TRUE(TaggedMetadataBody({validMetadata, sizeof(validMetadata)}).isComplete());
 }
 
 TEST(ParameterBody, LinesPreserveVolumeAndProgressValues) {
