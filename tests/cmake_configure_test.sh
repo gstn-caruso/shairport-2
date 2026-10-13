@@ -7,6 +7,7 @@ cxx_compiler=$3
 linkage_binary=$4
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
+"$c_compiler" -std=c17 -x c -fsyntax-only "$source_dir/pair_ap/pair.h" "$source_dir/pair_ap/pair-tlv.h"
 "$linkage_binary" --version > "$test_dir/version"
 grep -q 'AirPlay2-smi10-OpenSSL-Avahi-PulseAudio' "$test_dir/version"
 for feature in AIRPLAY_2 PULSEAUDIO AVAHI OPENSSL FFMPEG; do

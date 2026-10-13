@@ -58,8 +58,22 @@ typedef struct _tlv {
 } pair_tlv_t;
 
 
-typedef struct {
+typedef struct pair_tlv_values {
+#ifdef __cplusplus
+    pair_tlv_values() noexcept : head(nullptr) {}
+    ~pair_tlv_values();
+    pair_tlv_values(const pair_tlv_values &) = delete;
+    pair_tlv_values &operator=(const pair_tlv_values &) = delete;
+    int add(uint8_t type, const uint8_t *value, size_t size);
+    pair_tlv_t *find(uint8_t type) const;
+    int format(uint8_t *buffer, size_t *size) const;
+    int parse(const uint8_t *buffer, size_t length);
+#endif
     pair_tlv_t *head;
+#ifdef __cplusplus
+private:
+    int appendOwned(uint8_t type, uint8_t *value, size_t size);
+#endif
 } pair_tlv_values_t;
 
 
