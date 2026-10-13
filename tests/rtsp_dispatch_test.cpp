@@ -3,6 +3,7 @@
 #include "protocol/rtsp/rtsp.h"
 #include "protocol/rtsp/rtsp_message.hpp"
 #include "platform/utilities/rtsp_message_utilities.h"
+#include "platform/utilities/debug.h"
 #include <gtest/gtest.h>
 #include "protocol/ap2/ap2_event_receiver.h"
 #include <netinet/in.h>
@@ -17,6 +18,15 @@ protected:
 
   void SetUp() override { connection.thread = pthread_self(); }
   void dispatch() { rtsp_dispatch_request(&connection, &request, &response); }
+  std::string captureDispatch(int verbosity) {
+    const auto previous = debug_level();
+    set_debug_level(verbosity);
+    testing::internal::CaptureStderr();
+    dispatch();
+    auto output = testing::internal::GetCapturedStderr();
+    set_debug_level(previous);
+    return output;
+  }
 };
 
 TEST_F(RtspDispatch, SettingVolumeAndProgressRemembersTheRequestedLevel) {
@@ -218,6 +228,48 @@ TEST_F(RtspDispatch, MetadataAcceptsACompleteContainer) {
   dispatch();
 
   EXPECT_EQ(response.responseCode(), 200);
+}
+
+TEST_F(RtspDispatch, MetadataRejectionWarnsAtNormalVerbosityWithoutPayloadOrCredentials) {
+  connection.connection_number = 42;
+  request.request("SET_PARAMETER");
+  request.addHeader("Content-Type", "application/x-dmap-tagged");
+  request.addHeader("Authorization", "credential-marker");
+  request.replaceBody("payload-marker");
+  const auto output = captureDispatch(0);
+  EXPECT_EQ(response.responseCode(), 400);
+  EXPECT_NE(output.find("Connection 42: SET_PARAMETER rejected invalid tagged metadata framing"),
+            std::string::npos);
+  EXPECT_NE(output.find("body bytes: 14, response status: 400"), std::string::npos);
+  EXPECT_EQ(output.find("payload-marker"), std::string::npos);
+  EXPECT_EQ(output.find("credential-marker"), std::string::npos);
+}
+
+TEST_F(RtspDispatch, CompleteMetadataDoesNotEmitARejectionWarning) {
+  request.request("SET_PARAMETER");
+  request.addHeader("Content-Type", "application/x-dmap-tagged");
+  const char complete[] = {'m', 'l', 'i', 't', 0, 0, 0, 8, 'm', 'i', 'n', 'm', 0, 0, 0, 0};
+  request.replaceBody({complete, sizeof(complete)});
+  EXPECT_EQ(captureDispatch(0).find("rejected invalid tagged metadata"), std::string::npos);
+  EXPECT_EQ(response.responseCode(), 200);
+}
+
+TEST_F(RtspDispatch, UnknownParameterDiagnosticsSummarizeWithoutDumpingValuesOrHeaders) {
+  for (auto type : {"text/parameters", "application/type-marker"}) {
+    request = RtspMessage{};
+    response = RtspMessage{};
+    request.request("SET_PARAMETER");
+    request.addHeader("Content-Type", type);
+    request.addHeader("Authorization", "credential-marker");
+    request.replaceBody("payload-marker\r\n");
+    const auto output = captureDispatch(1);
+    EXPECT_EQ(response.responseCode(), 200);
+    EXPECT_NE(output.find("SET_PARAMETER"), std::string::npos);
+    EXPECT_NE(output.find("body bytes: 16"), std::string::npos);
+    EXPECT_EQ(output.find("payload-marker"), std::string::npos);
+    EXPECT_EQ(output.find("credential-marker"), std::string::npos);
+    EXPECT_EQ(output.find("type-marker"), std::string::npos);
+  }
 }
 
 TEST_F(RtspDispatch, CompleteMetadataIsAcceptedAfterAnIncompleteRequest) {

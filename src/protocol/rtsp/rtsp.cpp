@@ -2203,15 +2203,20 @@ static void handle_set_parameter(rtsp_conn_info *conn, RtspMessage *req, RtspMes
   RuntimeParameterVolumePort volume(*conn);
   RtspParameterHandler handler(volume);
   const auto diagnostics = handler.set(*req, *resp);
-  if (diagnostics.content == ParameterContent::text) {
+  if (diagnostics.content == ParameterContent::metadata && resp->hasResponseCode(400)) {
+    warn("Connection %d: SET_PARAMETER rejected invalid tagged metadata framing "
+         "(body bytes: %u, response status: %d).",
+         conn->connection_number, req->bodyLength(), resp->responseCode());
+  } else if (diagnostics.content == ParameterContent::text) {
     debug(3, "received parameters in SET_PARAMETER request.");
-    for (const auto &parameter : diagnostics.unrecognizedParameters)
-      debug(1, "Connection %d, unrecognised parameter: \"%s\"\n", conn->connection_number,
-            parameter.c_str());
+    if (!diagnostics.unrecognizedParameters.empty())
+      debug(1, "Connection %d: SET_PARAMETER contains %zu unrecognised text parameters "
+            "(body bytes: %u, response status: %d).", conn->connection_number,
+            diagnostics.unrecognizedParameters.size(), req->bodyLength(), resp->responseCode());
   } else if (diagnostics.content == ParameterContent::unknown) {
-    debug(1, "Connection %d: received unknown Content-Type \"%s\" in SET_PARAMETER request.",
-          conn->connection_number, req->headerValue("Content-Type"));
-    debug_print_msg_headers(1, req);
+    debug(1, "Connection %d: SET_PARAMETER has unsupported content type "
+          "(body bytes: %u, response status: %d).",
+          conn->connection_number, req->bodyLength(), resp->responseCode());
   } else if (diagnostics.content == ParameterContent::missing) {
     debug(1, "Connection %d: missing Content-Type header in SET_PARAMETER request.",
           conn->connection_number);
