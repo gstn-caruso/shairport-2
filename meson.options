@@ -1,0 +1,18 @@
+option(
+    'tests',
+    type: 'boolean',
+    value: true,
+    description: 'Build and register the receiver tests',
+)
+option(
+    'use_git_version',
+    type: 'boolean',
+    value: true,
+    description: 'Include Git revision information in development binaries',
+)
+option(
+    'install_config_files',
+    type: 'boolean',
+    value: true,
+    description: 'Install the sample configuration',
+)

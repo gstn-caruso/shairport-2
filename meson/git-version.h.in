@@ -1,0 +1,1 @@
+char git_version_string[] = "@VCS_TAG@";
