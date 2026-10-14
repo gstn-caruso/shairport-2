@@ -30,7 +30,7 @@
 #include "platform/utilities/network_utilities.h"
 
 #ifdef CONFIG_USE_GIT_VERSION_STRING
-#include "cmake-gitversion.h"
+#include "git-version.h"
 #endif
 
 #include <assert.h>

@@ -49,23 +49,29 @@ test('workflow checks advertise their purpose without changing job dependencies'
   assert.deepEqual(workflow.jobs.release.needs, ['plan', 'reference', 'release-policy']);
 });
 
-test('each configuration uses the expected build type and sanitizer flags in both languages', () => {
+test('each Meson configuration uses the pinned compilers and instruments both languages', () => {
   const configure = build.steps.find(step => step.name === 'Configure');
   assert.equal(configure.env.BUILD, '${{ matrix.build }}');
-  for (const [configuration, type, flags] of [
-    ['Release', 'Release', ''],
-    ['ASan-UBSan', 'Debug', '-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer'],
-    ['TSan', 'Debug', '-fsanitize=thread -fno-omit-frame-pointer']
+  for (const [configuration, type, sanitizer, flags] of [
+    ['Release', 'release', 'none', ''],
+    ['ASan-UBSan', 'debug', 'address,undefined', '-fno-sanitize-recover=all -fno-omit-frame-pointer'],
+    ['TSan', 'debug', 'thread', '-fno-omit-frame-pointer']
   ]) {
     const args = execFileSync('bash', ['-eu', '-c',
-      'cmake() { printf "%s\\n" "$@"; }\n' + configure.run],
+      'asdf() { printf "/toolchain/%s\\n" "$2"; }\n' +
+      'meson() { printf "%s\\n" "CC=$CC" "CXX=$CXX" "$@"; }\n' + configure.run],
     {encoding: 'utf8', env: {...process.env, BUILD: configuration}}).trim().split('\n');
-    assert.ok(args.includes(`-DCMAKE_BUILD_TYPE=${type}`));
-    for (const language of ['C', 'CXX']) assert.ok(args.includes(`-DCMAKE_${language}_FLAGS=${flags}`));
+    assert.ok(args.includes('CC=/toolchain/clang'));
+    assert.ok(args.includes('CXX=/toolchain/clang++'));
+    assert.ok(args.includes(`--buildtype=${type}`));
+    assert.ok(args.includes(`-Db_sanitize=${sanitizer}`));
+    for (const language of ['c', 'cpp']) assert.ok(args.includes(`-D${language}_args=${flags}`));
   }
   assert.equal(build.strategy['fail-fast'], false);
   assert.equal(build.steps.find(step => step.name === 'Test').run,
-    'ctest --test-dir build/cmake --no-tests=error --output-on-failure');
+    'meson test -C build/meson --print-errorlogs --num-processes 1');
+  assert.equal(build.steps.find(step => step.name === 'Build').run,
+    'meson compile -C build/meson -j 2');
 });
 
 test('installation and packaging run only in Release while instrumentation runs only in sanitizers', () => {
@@ -79,7 +85,21 @@ test('installation and packaging run only in Release while instrumentation runs 
   assert.equal(upload.with['if-no-files-found'], 'error');
   const diagnostics = build.steps.find(step => step.name === 'Upload failed test diagnostics');
   assert.equal(diagnostics.if, 'failure()');
-  assert.equal(diagnostics.with.path, 'build/cmake/Testing/Temporary/');
+  assert.equal(diagnostics.with.path, 'build/meson/meson-logs/');
+});
+
+test('Release stages and checks the native Meson Debian package', () => {
+  const installation = build.steps.find(step => step.name === 'Verify staged install').run;
+  assert.match(installation, /meson install -C build\/meson/);
+  assert.match(installation, /ruby tests\/install_contract_test.rb/);
+  const packaging = build.steps.find(step => step.name === 'Build Debian package').run;
+  assert.match(packaging, /meson compile -C build\/meson deb/);
+  assert.match(packaging, /ruby tests\/install_contract_test.rb/);
+  assert.match(packaging, /sha256sum --check/);
+  const dependencies = build.steps.find(step => step.name === 'Install C++26 build dependencies').run;
+  assert.match(dependencies, /\bmeson\b/);
+  assert.match(dependencies, /\bruby\b/);
+  assert.doesNotMatch(dependencies, /\bcmake\b/);
 });
 
 test('PRs validate without publication and publication requires successful validation', () => {
@@ -99,7 +119,7 @@ test('PRs validate without publication and publication requires successful valid
     (step.uses?.startsWith('actions/download-artifact@') || step.uses?.startsWith('actions/setup-node@') || step.run))) {
     if (step.if !== 'failure()') assert.equal(step.if, "steps.freshness.outputs.current == 'true'");
   }
-  assert.ok(publication.steps.every(step => !/cmake|cpack/.test(step.run ?? '')));
+  assert.ok(publication.steps.every(step => !/meson (?:setup|compile)|dpkg-deb --build/.test(step.run ?? '')));
 });
 
 test('all workflow and compiler setup steps have descriptive display names', () => {

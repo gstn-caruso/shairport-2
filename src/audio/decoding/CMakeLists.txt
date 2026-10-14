@@ -1,5 +1,0 @@
-add_library(receiver-audio-decoder STATIC audio_decoder.cpp)
-target_include_directories(receiver-audio-decoder PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_compile_options(receiver-audio-decoder PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
-target_link_libraries(receiver-audio-decoder PUBLIC receiver-audio-format PkgConfig::AVCODEC PkgConfig::AVUTIL Threads::Threads)
-target_link_libraries(receiver PUBLIC receiver-audio-decoder)

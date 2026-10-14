@@ -27,35 +27,53 @@ distributions, build from source.
 
 ### Build from source
 
-Requires CMake 4.2+, Ninja, Clang 23.1.3 with matching `clang-scan-deps`,
-libstdc++ 15 and GoogleTest 1.17+. From the repository root:
+Requires Meson 1.10+, Ninja, Clang 23.1.3, libstdc++ 15 and GoogleTest 1.17+.
+The commands below also install the Ruby and Debian tools used for package
+creation and installation checks. From the repository root:
 
 ```sh
-sudo apt-get install cmake ninja-build g++-15 g++ python3
+sudo apt-get install meson ninja-build g++-15 g++ ruby dpkg-dev systemd
 asdf plugin add clang https://github.com/higebu/asdf-llvm.git
 git -C "${ASDF_DATA_DIR:-$HOME/.asdf}/plugins/clang" checkout b7b8dd389c790237145e7436f1cd85b49611e37e
 asdf install
 asdf reshim clang
 sudo apt-get install pkg-config libgtest-dev libpopt-dev libconfig-dev libpulse-dev libavahi-client-dev libssl-dev libplist-dev libplist-utils libsodium-dev libgcrypt20-dev uuid-dev libavutil-dev libavcodec-dev libavformat-dev libswresample-dev xxd
-cmake -S . -B build/cmake -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/clang-toolchain.cmake \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_SYSCONFDIR=/etc
-cmake --build build/cmake --parallel 2
-ctest --test-dir build/cmake --no-tests=error --output-on-failure
-DESTDIR="$PWD/build/cmake/stage" cmake --install build/cmake
+CC="$(asdf which clang)" CXX="$(asdf which clang++)" \
+  meson setup build/meson --buildtype=release --prefix=/usr --sysconfdir=/etc \
+  -Duse_git_version=false
+meson compile -C build/meson -j 2
+meson test -C build/meson --print-errorlogs --num-processes 1
+meson install -C build/meson --destdir "$PWD/build/meson/stage"
+ruby tests/install_contract_test.rb "$PWD/build/meson/stage" /usr "$(cat VERSION)"
 ```
 
-The asdf plugin builds LLVM from source. Use a fresh build directory after
-moving a checkout, and remove stale source-tree `config.h` before configuring.
-`-DBUILD_TESTING=OFF` skips GoogleTest. Inspect the staged files, then install:
+The asdf plugin builds LLVM from source. Resolve the compiler paths with
+`asdf which` so builds outside the checkout also use the pinned compiler.
+Use a fresh build directory after moving a checkout, and remove stale
+source-tree `config.h` before configuring. `-Dtests=false` skips GoogleTest;
+`-Dinstall_config_files=false` omits the sample configuration. Git revision
+information is enabled by default; the commands above disable it for a release
+build. Inspect the staged files, then install:
 
 ```sh
-sudo cmake --install build/cmake
+sudo meson install -C build/meson
 ```
 
-Source installs default to `/usr/local/bin`; packages use `/usr/bin`. See the
-[CI workflow](.github/workflows/receiver.yml) for Debian packaging and sanitizer
-build commands.
+Meson's default prefix is `/usr/local`; the commands above select `/usr` with
+configuration under `/etc`, as required for Debian packages. Build a package
+from the same configuration:
+
+```sh
+meson compile -C build/meson deb
+(cd build/meson/packages && sha256sum --check *.sha256)
+```
+
+The package and checksum are written to `build/meson/packages/`. The `deb`
+target is available when Ruby, `dpkg`, `dpkg-deb` and `dpkg-shlibdeps` are
+installed at configure time. After adding these tools, run
+`meson setup --reconfigure build/meson`. See the
+[CI workflow](.github/workflows/receiver.yml) for sanitizer build commands and
+package extraction checks.
 
 ## Configure and play
 

@@ -32,7 +32,7 @@ for option in WITH_ALSA=true CONFIG_AIRPLAY_2=false WITH_SSL=mbedtls CONFIG_LIBD
   fi
   grep -q 'Unknown option' "$test_dir/output"
 done
-for option in cpp_std=c++23 cpp_std=gnu++26; do
+for option in cpp_std=c++23 cpp_std=gnu++26 cpp_args=-std=c++23 cpp_args=-std=gnu++26; do
   if meson setup "$test_dir/$option" "$source_dir" "-D$option" > "$test_dir/output" 2>&1; then
     echo "Accepted incompatible C++ dialect $option" >&2
     exit 1

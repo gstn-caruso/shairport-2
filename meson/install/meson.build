@@ -25,7 +25,7 @@ install_data(
     install_dir: docdir / 'nqptp',
 )
 unit_config = configuration_data()
-unit_config.set('CMAKE_INSTALL_FULL_BINDIR', bindir)
+unit_config.set('bindir', bindir)
 companion_unit = configure_file(
     input: '../../scripts/shairport-2-nqptp.service.in',
     output: 'shairport-2-nqptp.service',

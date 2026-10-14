@@ -30,6 +30,18 @@ endif
 if get_option('cpp_std') != 'c++26'
     error('C++26 without extensions is required')
 endif
+foreach argument : get_option('cpp_args')
+    standard_option = argument.startswith('-std=') or argument.startswith(
+        '--std=',
+    )
+    incompatible_standard = standard_option and argument not in [
+        '-std=c++26',
+        '--std=c++26',
+    ]
+    if argument == '-ansi' or incompatible_standard
+        error('C++26 without extensions is required')
+    endif
+endforeach
 threads = dependency('threads')
 probe = cpp.run(
     files('meson/cpp26_probe.cpp'),
@@ -90,7 +102,11 @@ legacy_args = [
     '-DSYSCONFDIR="' + sysconfdir + '"',
 ]
 config = configuration_data()
-config.set('CONFIG_USE_GIT_VERSION_STRING', get_option('use_git_version'))
+git = find_program('git', required: false)
+use_git_version = get_option('use_git_version') and git.found() and fs.exists(
+    meson.project_source_root() / '.git',
+)
+config.set('CONFIG_USE_GIT_VERSION_STRING', use_git_version)
 config.set('HAVE_LIBPLIST_GE_2_3_0', plist.version().version_compare('>=2.3.0'))
 config.set('PROJECT_VERSION', meson.project_version())
 configure_file(
@@ -98,12 +114,15 @@ configure_file(
     output: 'config.h',
     configuration: config,
 )
-git_version = vcs_tag(
-    input: 'meson/git-version.h.in',
-    output: 'cmake-gitversion.h',
-    command: ['git', 'describe', '--tags', '--dirty', '--broken', '--always'],
-    fallback: 'NA',
-)
+git_version = []
+if use_git_version
+    git_version = vcs_tag(
+        input: 'meson/git-version.h.in',
+        output: 'git-version.h',
+        command: [git, 'describe', '--tags', '--dirty', '--broken', '--always'],
+        fallback: 'NA',
+    )
+endif
 
 # Meson's module scanner does not support dotted Clang module names. Explicit
 # PCM targets preserve those public names and expose header dependencies to Ninja.
@@ -181,7 +200,7 @@ subdir('src')
 subdir('meson/components')
 receiver = static_library(
     'receiver',
-    receiver_sources + plist_sources + [git_version],
+    receiver_sources + plist_sources + git_version,
     include_directories: includes,
     dependencies: receiver_external_deps + component_deps + [pair_ap_dep],
     cpp_args: legacy_args,

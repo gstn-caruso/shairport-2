@@ -2,7 +2,7 @@ Describe the receiver problem and resulting behavior. Target `master`.
 
 Validation:
 
-- [ ] Linux PulseAudio CMake build and CTest contracts
+- [ ] Linux PulseAudio Meson build and test contracts
 - [ ] Independent review of the diff
 - [ ] CI green before merge
 

@@ -8,7 +8,7 @@ work_dir = File.join(build_dir, 'debian-package')
 stage = File.join(work_dir, 'debian/shairport-2')
 packages = File.join(build_dir, 'packages')
 FileUtils.rm_rf(work_dir)
-FileUtils.mkdir_p([stage, packages])
+FileUtils.mkdir_p([stage, packages], mode: 0o755)
 abort 'Staged installation failed' unless system(meson, 'install', '-C', build_dir, '--no-rebuild', '--destdir', stage)
 receiver = File.join(stage, 'usr/bin/shairport-2')
 companion = File.join(stage, 'usr/bin/shairport-2-nqptp')
@@ -31,8 +31,8 @@ warn error unless error.empty?
 dependencies = output.lines.find { |line| line.start_with?('shlibs:Depends=') }&.delete_prefix('shlibs:Depends=')&.strip
 abort 'dpkg-shlibdeps did not report runtime dependencies' if dependencies.nil? || dependencies.empty?
 control += "Depends: avahi-daemon, systemd, pulseaudio | pipewire-pulse, #{dependencies}\n"
-FileUtils.mkdir_p(File.join(stage, 'DEBIAN'))
-File.write(File.join(stage, 'DEBIAN/control'), control)
+FileUtils.mkdir_p(File.join(stage, 'DEBIAN'), mode: 0o755)
+File.write(File.join(stage, 'DEBIAN/control'), control, mode: 'w', perm: 0o644)
 package_name = "shairport-2_#{version}_#{architecture}.deb"
 package = File.join(packages, package_name)
 abort 'dpkg-deb failed' unless system(dpkg_deb, '--root-owner-group', '--build', stage, package)

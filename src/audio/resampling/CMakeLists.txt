@@ -1,5 +1,0 @@
-add_library(receiver-audio-resampler STATIC resampler.cpp)
-target_include_directories(receiver-audio-resampler PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_compile_options(receiver-audio-resampler PRIVATE -Wall -Wextra -Wshadow -Wformat=2 -fno-common)
-target_link_libraries(receiver-audio-resampler PUBLIC receiver-audio-format PkgConfig::SWRESAMPLE PkgConfig::AVUTIL Threads::Threads)
-target_link_libraries(receiver PUBLIC receiver-audio-resampler)

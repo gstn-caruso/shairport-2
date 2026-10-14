@@ -67,7 +67,7 @@ jobs:
       - name: Install C++26 build dependencies
         run: |
           apt-get update
-          apt-get install -y ca-certificates curl git cmake ninja-build gcc-15 g++-15 g++ zstd pkg-config libgtest-dev libpopt-dev libconfig-dev libpulse-dev libavahi-client-dev libssl-dev libplist-dev libplist-utils libsodium-dev libgcrypt20-dev uuid-dev libavutil-dev libavcodec-dev libavformat-dev libswresample-dev xxd dpkg-dev file systemd
+          apt-get install -y ca-certificates curl git meson ninja-build ruby gcc-15 g++-15 g++ zstd pkg-config libgtest-dev libpopt-dev libconfig-dev libpulse-dev libavahi-client-dev libssl-dev libplist-dev libplist-utils libsodium-dev libgcrypt20-dev uuid-dev libavutil-dev libavcodec-dev libavformat-dev libswresample-dev xxd dpkg-dev file systemd
       - name: Check out source
         uses: actions/checkout@v6
       - name: Use the planned package version
@@ -83,15 +83,16 @@ jobs:
         env:
           BUILD: ${{ matrix.build }}
         run: |
-          build_type="$BUILD"
+          build_type=release
+          sanitizer=none
           sanitizer_flags=
           case "$BUILD" in
-            ASan-UBSan) build_type=Debug; sanitizer_flags='-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer' ;;
-            TSan) build_type=Debug; sanitizer_flags='-fsanitize=thread -fno-omit-frame-pointer' ;;
+            ASan-UBSan) build_type=debug; sanitizer=address,undefined; sanitizer_flags='-fno-sanitize-recover=all -fno-omit-frame-pointer' ;;
+            TSan) build_type=debug; sanitizer=thread; sanitizer_flags='-fno-omit-frame-pointer' ;;
           esac
-          cmake -S . -B build/cmake -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/clang-toolchain.cmake -DCMAKE_BUILD_TYPE="$build_type" -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_SYSCONFDIR=/etc -DUSE_GIT_VERSION=OFF -DCMAKE_C_FLAGS="$sanitizer_flags" -DCMAKE_CXX_FLAGS="$sanitizer_flags"
+          CC="$(asdf which clang)" CXX="$(asdf which clang++)" meson setup build/meson --buildtype="$build_type" --prefix=/usr --sysconfdir=/etc -Duse_git_version=false -Db_sanitize="$sanitizer" -Dc_args="$sanitizer_flags" -Dcpp_args="$sanitizer_flags"
       - name: Build
-        run: cmake --build build/cmake --parallel 2
+        run: meson compile -C build/meson -j 2
       - name: Verify sanitizer instrumentation
         if: matrix.build != 'Release'
         env:
@@ -99,58 +100,54 @@ jobs:
         run: |
           case "$BUILD" in
             ASan-UBSan)
-              nm -u build/cmake/CMakeFiles/receiver.dir/src/platform/utilities/structured_buffer.cpp.o | grep __asan_init
-              nm -u build/cmake/CMakeFiles/receiver.dir/src/protocol/rtsp/rtsp.cpp.o | grep __ubsan_handle
-              nm -u build/cmake/companion/nqptp/CMakeFiles/nqptp-core.dir/runtime.cpp.o | grep __asan_init
-              nm -u build/cmake/companion/nqptp/CMakeFiles/nqptp-core.dir/nqptp-message-handlers.cpp.o | grep __ubsan_handle
+              nm -u build/meson/libreceiver.a.p/src_platform_utilities_structured_buffer.cpp.o | grep __asan_init
+              nm -u build/meson/libreceiver.a.p/src_protocol_rtsp_rtsp.cpp.o | grep __ubsan_handle
+              nm -u build/meson/companion/nqptp/libnqptp-core.a.p/runtime.cpp.o | grep __asan_init
+              nm -u build/meson/companion/nqptp/libnqptp-core.a.p/nqptp-message-handlers.cpp.o | grep __ubsan_handle
+              nm -u build/meson/meson/modules/receiver.protocol.ap2.realtime_audio.o | grep __asan_init
               ;;
             TSan)
-              nm -u build/cmake/CMakeFiles/receiver.dir/src/platform/utilities/structured_buffer.cpp.o | grep __tsan_init
-              nm -u build/cmake/CMakeFiles/receiver.dir/src/protocol/rtsp/rtsp.cpp.o | grep __tsan_init
-              nm -u build/cmake/companion/nqptp/CMakeFiles/nqptp-core.dir/runtime.cpp.o | grep __tsan_init
-              nm -u build/cmake/companion/nqptp/CMakeFiles/nqptp-core.dir/nqptp-message-handlers.cpp.o | grep __tsan_init
+              nm -u build/meson/libreceiver.a.p/src_platform_utilities_structured_buffer.cpp.o | grep __tsan_init
+              nm -u build/meson/libreceiver.a.p/src_protocol_rtsp_rtsp.cpp.o | grep __tsan_init
+              nm -u build/meson/companion/nqptp/libnqptp-core.a.p/runtime.cpp.o | grep __tsan_init
+              nm -u build/meson/companion/nqptp/libnqptp-core.a.p/nqptp-message-handlers.cpp.o | grep __tsan_init
+              nm -u build/meson/meson/modules/receiver.protocol.ap2.realtime_audio.o | grep __tsan_init
               ;;
           esac
       - name: Test
-        run: ctest --test-dir build/cmake --no-tests=error --output-on-failure
+        run: meson test -C build/meson --print-errorlogs --num-processes 1
       - name: Verify staged install
         if: matrix.build == 'Release'
         run: |
-          DESTDIR="$PWD/build/cmake/stage" cmake --install build/cmake
-          test -f build/cmake/stage/usr/bin/shairport-2
-          cmp man/shairport-2.1 build/cmake/stage/usr/share/man/man1/shairport-2.1
-          cmp scripts/shairport-2.conf build/cmake/stage/etc/shairport-2.conf.sample
-          test -f build/cmake/stage/usr/lib/systemd/user/shairport-2.service
-          cmake -DROOT="$PWD/build/cmake/stage" -DPREFIX=/usr -P tests/program_identity_test.cmake
-          cmake -DROOT="$PWD/build/cmake/stage" -DPREFIX=/usr -DVERSION="$(cat VERSION)" -P tests/nqptp_package_test.cmake
-          cmake -DROOT="$PWD/build/cmake/stage" -DPREFIX=/usr -P tests/nqptp_unit_test.cmake
+          meson install -C build/meson --destdir "$PWD/build/meson/stage"
+          cmp man/shairport-2.1 build/meson/stage/usr/share/man/man1/shairport-2.1
+          cmp scripts/shairport-2.conf build/meson/stage/etc/shairport-2.conf.sample
+          ruby tests/install_contract_test.rb "$PWD/build/meson/stage" /usr "$(cat VERSION)"
       - name: Build Debian package
         if: matrix.build == 'Release'
         run: |
-          cpack --config build/cmake/CPackConfig.cmake -B build/cmake/packages
-          dpkg-deb --info build/cmake/packages/*.deb
-          dpkg-deb --contents build/cmake/packages/*.deb
-          dpkg-deb -x build/cmake/packages/*.deb build/cmake/package-check
+          meson compile -C build/meson deb
+          dpkg-deb --info build/meson/packages/*.deb
+          dpkg-deb --contents build/meson/packages/*.deb
+          dpkg-deb -x build/meson/packages/*.deb build/meson/package-check
           version=$(cat VERSION)
-          test "$(dpkg-deb -f build/cmake/packages/*.deb Version)" = "$version"
-          test "$(dpkg-deb -f build/cmake/packages/*.deb Architecture)" = '${{ matrix.platform.architecture }}'
-          build/cmake/package-check/usr/bin/shairport-2 --version | grep -F "$version-AirPlay2-"
-          build/cmake/package-check/usr/bin/shairport-2 --check-config --config build/cmake/package-check/etc/shairport-2.conf.sample
-          cmake -DROOT="$PWD/build/cmake/package-check" -DPREFIX=/usr -DVERSION="$version" -DPACKAGE="$PWD/build/cmake/packages/shairport-2_${version}_${{ matrix.platform.architecture }}.deb" -P tests/nqptp_package_test.cmake
-          cmake -DROOT="$PWD/build/cmake/package-check" -DPREFIX=/usr -DPACKAGE="$PWD/build/cmake/packages/shairport-2_${version}_${{ matrix.platform.architecture }}.deb" -P tests/program_identity_test.cmake
+          test "$(dpkg-deb -f build/meson/packages/*.deb Architecture)" = '${{ matrix.platform.architecture }}'
+          build/meson/package-check/usr/bin/shairport-2 --check-config --config build/meson/package-check/etc/shairport-2.conf.sample
+          ruby tests/install_contract_test.rb "$PWD/build/meson/package-check" /usr "$version" "$PWD/build/meson/packages/shairport-2_${version}_${{ matrix.platform.architecture }}.deb"
+          (cd build/meson/packages && sha256sum --check *.sha256)
       - name: Upload Debian package
         if: matrix.build == 'Release'
         uses: actions/upload-artifact@v6
         with:
           name: deb-ubuntu-26.04-${{ matrix.platform.architecture }}-${{ github.sha }}
-          path: build/cmake/packages/*
+          path: build/meson/packages/*
           if-no-files-found: error
       - name: Upload failed test diagnostics
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: ctest-${{ matrix.platform.architecture }}-${{ matrix.build }}-${{ github.sha }}
-          path: build/cmake/Testing/Temporary/
+          name: meson-tests-${{ matrix.platform.architecture }}-${{ matrix.build }}-${{ github.sha }}
+          path: build/meson/meson-logs/
           if-no-files-found: ignore
   release-policy:
     name: Validate release automation
