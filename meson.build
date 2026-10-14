@@ -201,3 +201,4 @@ subdir('companion/nqptp')
 if get_option('tests')
     subdir('tests')
 endif
+subdir('meson/install')
