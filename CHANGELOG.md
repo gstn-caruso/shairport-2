@@ -1,3 +1,17 @@
+## [7.0.2](https://github.com/gstn-caruso/shairport-2/compare/v7.0.1...v7.0.2) (2026-10-15)
+
+### Bug Fixes
+
+* **rtsp:** preserve request boundaries across TCP reads ([#87](https://github.com/gstn-caruso/shairport-2/issues/87)) ([edff94a](https://github.com/gstn-caruso/shairport-2/commit/edff94a9c0cc9511811dbdf01734aa381457bb8e))
+
+### Documentation
+
+* **readme:** simplify installation and usage guide ([#85](https://github.com/gstn-caruso/shairport-2/issues/85)) ([3f7038d](https://github.com/gstn-caruso/shairport-2/commit/3f7038d5119f5c7f44e187fa1344441bb29e3875))
+
+### Code Refactoring
+
+* **pairing:** migrate to C++ and encapsulate TLV ownership ([#84](https://github.com/gstn-caruso/shairport-2/issues/84)) ([a80d214](https://github.com/gstn-caruso/shairport-2/commit/a80d214e1e5087ad509c3b2cddc12c3a27a208a0))
+
 ## [7.0.1](https://github.com/gstn-caruso/shairport-2/compare/v7.0.0...v7.0.1) (2026-10-13)
 
 ### Bug Fixes
