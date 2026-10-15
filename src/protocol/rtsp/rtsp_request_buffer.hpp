@@ -4,4 +4,5 @@
 
 struct RtspRequestBuffer {
   std::string bytes;
+  bool skipLineFeed = false;
 };

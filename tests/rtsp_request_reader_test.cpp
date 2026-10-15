@@ -232,7 +232,7 @@ TEST(RtspRequestReader, TerminalCarriageReturnIsConsumedWithinEachFragment) {
   EXPECT_TRUE(result.message->bodyText().empty());
 }
 
-TEST(RtspRequestReader, SplitCrLfDoesNotIncludeTrailingHeadersInEmptyBody) {
+TEST(RtspRequestReader, SplitCrLfPreservesFollowingHeaders) {
   RequestInput input;
   input.stop = false;
   input.fragments = {"OPTIONS /info RTSP/1.0\r", "\nCSeq: 1\r\n\r\n"};
@@ -241,8 +241,68 @@ TEST(RtspRequestReader, SplitCrLfDoesNotIncludeTrailingHeadersInEmptyBody) {
   RtspRequestReader reader(input, clock, effects);
   auto result = reader.read();
   ASSERT_EQ(result.status, RtspRequestStatus::success);
-  EXPECT_EQ(result.message->headerValue("CSeq"), nullptr);
+  EXPECT_STREQ(result.message->headerValue("CSeq"), "1");
   EXPECT_TRUE(result.message->bodyText().empty());
+}
+
+TEST(RtspRequestReader, SplitHeaderTerminatorPreservesBinaryBodyAndFollowingRequests) {
+  RequestInput input;
+  input.stop = false;
+  input.fragments = {"POST /feedback RTSP/1.0\r", "\nContent-Length: 3\r\n\r",
+                     std::string("\nA\0", 3),
+                     "BOPTIONS /next RTSP/1.0\r\n\r\nPOST /last RTSP/1.0\r\nContent-Length: 2\r\n\r\nCD"};
+  RequestClock clock;
+  RequestEffects effects;
+  RtspRequestReader reader(input, clock, effects);
+  auto first = reader.read();
+  ASSERT_EQ(first.status, RtspRequestStatus::success);
+  EXPECT_EQ(first.message->bodyText(), std::string_view("A\0B", 3));
+  auto second = reader.read();
+  ASSERT_EQ(second.status, RtspRequestStatus::success);
+  EXPECT_TRUE(second.message->requestsMethod("OPTIONS"));
+  EXPECT_TRUE(second.message->requestsPath("/next"));
+  EXPECT_TRUE(second.message->bodyText().empty());
+  auto third = reader.read();
+  ASSERT_EQ(third.status, RtspRequestStatus::success);
+  EXPECT_TRUE(third.message->requestsMethod("POST"));
+  EXPECT_EQ(third.message->bodyText(), "CD");
+  EXPECT_EQ(reader.read().status, RtspRequestStatus::channelClosed);
+}
+
+TEST(RtspRequestReader, SplitEmptyBodyTerminatorDoesNotBecomeNextRequest) {
+  RequestInput input;
+  input.stop = false;
+  input.fragments = {"OPTIONS /first RTSP/1.0\r\n\r", "\nGET /second RTSP/1.0\r\n\r\n"};
+  RequestClock clock;
+  RequestEffects effects;
+  RtspRequestReader reader(input, clock, effects);
+  auto first = reader.read();
+  ASSERT_EQ(first.status, RtspRequestStatus::success);
+  EXPECT_TRUE(first.message->requestsPath("/first"));
+  auto second = reader.read();
+  ASSERT_EQ(second.status, RtspRequestStatus::success);
+  EXPECT_TRUE(second.message->requestsMethod("GET"));
+  EXPECT_TRUE(second.message->requestsPath("/second"));
+}
+
+TEST(RtspRequestReader, BufferedRequestsBelongToTheirReader) {
+  RequestInput firstInput, secondInput;
+  firstInput.stop = secondInput.stop = false;
+  firstInput.fragments = {"OPTIONS /first RTSP/1.0\r\n\r\nGET /buffered RTSP/1.0\r\n\r\n"};
+  secondInput.fragments = {"POST /independent RTSP/1.0\r\nContent-Length: 1\r\n\r\nB"};
+  RequestClock clock;
+  RequestEffects effects;
+  RtspRequestReader firstReader(firstInput, clock, effects);
+  RtspRequestReader secondReader(secondInput, clock, effects);
+  ASSERT_EQ(firstReader.read().status, RtspRequestStatus::success);
+  auto independent = secondReader.read();
+  ASSERT_EQ(independent.status, RtspRequestStatus::success);
+  EXPECT_TRUE(independent.message->requestsPath("/independent"));
+  EXPECT_EQ(independent.message->bodyText(), "B");
+  auto buffered = firstReader.read();
+  ASSERT_EQ(buffered.status, RtspRequestStatus::success);
+  EXPECT_TRUE(buffered.message->requestsMethod("GET"));
+  EXPECT_TRUE(buffered.message->requestsPath("/buffered"));
 }
 
 TEST(RtspRequestReader, BodyLargerThanHeaderBufferReadsDeclaredMissingLength) {

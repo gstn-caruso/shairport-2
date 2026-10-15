@@ -51,6 +51,7 @@ public:
   RtspRequestResult read();
 private:
   struct Pending;
+  void consumeLineFeed(Pending &request);
   std::optional<RtspRequestStatus> readHeaders(Pending &request);
   std::optional<RtspRequestStatus> readBody(Pending &request);
   std::optional<RtspRequestStatus> receive(Pending &request, std::size_t count, RtspRequestPhase phase);

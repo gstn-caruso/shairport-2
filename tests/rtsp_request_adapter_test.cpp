@@ -155,6 +155,62 @@ TEST_F(RequestSocket, CipherAdapterDecryptsActualEncryptedRequest) {
   EXPECT_EQ(std::string_view(reinterpret_cast<char *>(decoded.get()),plainLength),*expected);
 }
 
+TEST_F(RequestSocket, CipherAdapterPreservesCoalescedBinaryRequestsAcrossReceiveCalls) {
+  const std::array<uint8_t, 32> keyMaterial{};
+  ASSERT_TRUE(connection.pairingSession.controlChannel().prepare(
+      PAIR_SERVER_HOMEKIT, 3, keyMaterial, "", "Control"));
+  std::unique_ptr<pair_cipher_context, decltype(&pair_cipher_free)> sender(
+      pair_cipher_new(PAIR_CLIENT_HOMEKIT_NORMAL, 0, keyMaterial.data(), keyMaterial.size(), ""),
+      pair_cipher_free);
+  ASSERT_NE(sender, nullptr);
+  const auto sendEncrypted = [&](std::string_view packet) {
+    uint8_t *encrypted = nullptr;
+    size_t encryptedLength = 0;
+    const auto consumed = pair_encrypt(&encrypted, &encryptedLength,
+        reinterpret_cast<const uint8_t *>(packet.data()), packet.size(), sender.get());
+    std::unique_ptr<uint8_t, decltype(&std::free)> bytes(encrypted, std::free);
+    ASSERT_EQ(consumed, static_cast<ssize_t>(packet.size()));
+    send(std::string_view(reinterpret_cast<const char *>(bytes.get()), encryptedLength));
+  };
+  std::string packet = "POST /first RTSP/1.0\r\nContent-Length: 3\r\n\r\n";
+  packet.append("A\0B", 3);
+  packet += "OPTIONS /second RTSP/1.0\r\n\r\n";
+  sendEncrypted(packet);
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  EXPECT_TRUE(message->requestsPath("/first"));
+  EXPECT_EQ(message->bodyText(), std::string_view("A\0B", 3));
+  msg_free(&message);
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  EXPECT_TRUE(message->requestsMethod("OPTIONS"));
+  EXPECT_TRUE(message->bodyText().empty());
+  msg_free(&message);
+  sendEncrypted("POST /third RTSP/1.0\r\nContent-Length: 2\r\n\r\nCD");
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  EXPECT_TRUE(message->requestsPath("/third"));
+  EXPECT_EQ(message->bodyText(), "CD");
+}
+
+TEST_F(RequestSocket, ShutdownTakesPrecedenceOverBufferedRequest) {
+  send("OPTIONS /first RTSP/1.0\r\n\r\nOPTIONS /second RTSP/1.0\r\n\r\n");
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  msg_free(&message);
+  connection.stop = 1;
+  EXPECT_EQ(receive(), rtsp_read_request_response_immediate_shutdown_requested);
+  EXPECT_EQ(message, nullptr);
+}
+
+TEST_F(RequestSocket, SplitTerminatorSurvivesReaderRecreationBetweenRequests) {
+  send("OPTIONS /first RTSP/1.0\r\n\r");
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  EXPECT_TRUE(message->requestsPath("/first"));
+  msg_free(&message);
+  send("\nGET /second RTSP/1.0\r\n\r\n");
+  shutdown(peer, SHUT_WR);
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  EXPECT_TRUE(message->requestsMethod("GET"));
+  EXPECT_TRUE(message->requestsPath("/second"));
+}
+
 TEST_F(RequestSocket, PreparedControlCipherKeepsPairSetupResponsePlaintext) {
   const std::array<uint8_t,32> key{};
   auto &channel = connection.pairingSession.controlChannel();
