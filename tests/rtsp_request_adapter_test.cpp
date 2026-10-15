@@ -49,12 +49,36 @@ TEST_F(RequestSocket, MixedDelimitersPreserveBinaryBodyAndCStringHeaderParsing) 
   EXPECT_EQ(message->bodyText(), std::string_view("A\0B", 3));
 }
 
-TEST_F(RequestSocket, BufferedExcessIncludingNextRequestRemainsInBody) {
-  const std::string excess = "abcOPTIONS /info RTSP/1.0\r\n\r\n";
-  send("POST /feedback RTSP/1.0\r\nContent-Length: 1\r\n\r\n" + excess);
+TEST_F(RequestSocket, CoalescedRequestsPreserveDeclaredBodyAndNextRequest) {
+  send("POST /feedback RTSP/1.0\r\nContent-Length: 1\r\n\r\naOPTIONS /info RTSP/1.0\r\n\r\n");
+  shutdown(peer, SHUT_WR);
   ASSERT_EQ(receive(), rtsp_read_request_response_ok);
   ASSERT_NE(message, nullptr);
-  EXPECT_EQ(message->bodyText(), excess);
+  EXPECT_TRUE(message->requestsMethod("POST"));
+  EXPECT_EQ(message->bodyText(), "a");
+  msg_free(&message);
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  ASSERT_NE(message, nullptr);
+  EXPECT_TRUE(message->requestsMethod("OPTIONS"));
+  EXPECT_TRUE(message->requestsPath("/info"));
+  EXPECT_TRUE(message->bodyText().empty());
+  msg_free(&message);
+  EXPECT_EQ(receive(), rtsp_read_request_response_channel_closed);
+}
+
+TEST_F(RequestSocket, CoalescedRequestsWithoutContentLengthHaveEmptyBodies) {
+  send("OPTIONS /info RTSP/1.0\r\n\r\nGET /next RTSP/1.0\r\nContent-Length: 0\r\n\r\n");
+  shutdown(peer, SHUT_WR);
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  ASSERT_NE(message, nullptr);
+  EXPECT_TRUE(message->requestsMethod("OPTIONS"));
+  EXPECT_TRUE(message->bodyText().empty());
+  msg_free(&message);
+  ASSERT_EQ(receive(), rtsp_read_request_response_ok);
+  ASSERT_NE(message, nullptr);
+  EXPECT_TRUE(message->requestsMethod("GET"));
+  EXPECT_TRUE(message->requestsPath("/next"));
+  EXPECT_TRUE(message->bodyText().empty());
 }
 
 TEST_F(RequestSocket, HeaderEofClosesLocalDescriptorAndReleasesMessage) {

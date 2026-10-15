@@ -45,11 +45,15 @@ std::optional<RtspRequestStatus> RtspRequestReader::receive(Pending &request, st
 }
 
 std::optional<RtspRequestStatus> RtspRequestReader::readHeaders(Pending &request) {
+  bool hasBufferedInput = request.used > 0;
   while (request.contentLength < 0) {
     if (stopped(RtspRequestPhase::headers))
       return RtspRequestStatus::shutdown;
-    if (auto failure = receive(request, request.capacity - request.used, RtspRequestPhase::headers))
-      return failure;
+    if (!hasBufferedInput) {
+      if (auto failure = receive(request, request.capacity - request.used, RtspRequestPhase::headers))
+        return failure;
+    }
+    hasBufferedInput = false;
     while (request.contentLength < 0) {
       const std::string_view buffered(request.bytes.get(), request.used);
       const auto delimiter = buffered.find_first_of("\r\n");
@@ -102,12 +106,17 @@ RtspRequestResult RtspRequestReader::read() {
   auto phase = RtspRequestPhase::headers;
   try {
     Pending request;
+    request.used = buffer_.bytes.size();
+    std::memcpy(request.bytes.get(), buffer_.bytes.data(), request.used);
+    buffer_.bytes.clear();
     if (auto failure = readHeaders(request))
       return {*failure, {}};
     phase = RtspRequestPhase::body;
     if (auto failure = readBody(request))
       return {*failure, {}};
-    request.message->replaceBody(std::string_view(request.bytes.get(), request.used));
+    const auto length = static_cast<std::size_t>(request.contentLength);
+    request.message->replaceBody(std::string_view(request.bytes.get(), length));
+    buffer_.bytes.assign(request.bytes.get() + length, request.used - length);
     return {RtspRequestStatus::success, std::move(request.message)};
   } catch (const std::bad_alloc &) {
     effects_.diagnostic(RtspRequestDiagnostic::allocationFailure, phase, 0);

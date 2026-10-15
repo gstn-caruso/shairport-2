@@ -232,7 +232,7 @@ TEST(RtspRequestReader, TerminalCarriageReturnIsConsumedWithinEachFragment) {
   EXPECT_TRUE(result.message->bodyText().empty());
 }
 
-TEST(RtspRequestReader, SplitCrLfKeepsLeadingLfAsEmptyLineAndBufferedExcessAsBody) {
+TEST(RtspRequestReader, SplitCrLfDoesNotIncludeTrailingHeadersInEmptyBody) {
   RequestInput input;
   input.stop = false;
   input.fragments = {"OPTIONS /info RTSP/1.0\r", "\nCSeq: 1\r\n\r\n"};
@@ -242,7 +242,7 @@ TEST(RtspRequestReader, SplitCrLfKeepsLeadingLfAsEmptyLineAndBufferedExcessAsBod
   auto result = reader.read();
   ASSERT_EQ(result.status, RtspRequestStatus::success);
   EXPECT_EQ(result.message->headerValue("CSeq"), nullptr);
-  EXPECT_EQ(result.message->bodyText(), "CSeq: 1\r\n\r\n");
+  EXPECT_TRUE(result.message->bodyText().empty());
 }
 
 TEST(RtspRequestReader, BodyLargerThanHeaderBufferReadsDeclaredMissingLength) {
