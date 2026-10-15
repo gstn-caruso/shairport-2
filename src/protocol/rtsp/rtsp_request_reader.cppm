@@ -1,5 +1,6 @@
 module;
 #include "protocol/rtsp/rtsp_message.hpp"
+#include "protocol/rtsp/rtsp_request_buffer.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -42,13 +43,15 @@ export struct RtspRequestResult {
 };
 export class RtspRequestReader {
 public:
-  RtspRequestReader(RtspRequestInput &input, RtspRequestClock &clock, RtspRequestEffects &effects)
-      : input_(input), clock_(clock), effects_(effects) {}
+  RtspRequestReader(RtspRequestInput &input, RtspRequestClock &clock, RtspRequestEffects &effects,
+                    RtspRequestBuffer *buffer = nullptr)
+      : input_(input), clock_(clock), effects_(effects), buffer_(buffer ? *buffer : ownedBuffer_) {}
   // Allocation failures become a result without a message. Other exceptions propagate;
   // in particular, cancellation unwinding releases pending storage through RAII.
   RtspRequestResult read();
 private:
   struct Pending;
+  void consumeLineFeed(Pending &request);
   std::optional<RtspRequestStatus> readHeaders(Pending &request);
   std::optional<RtspRequestStatus> readBody(Pending &request);
   std::optional<RtspRequestStatus> receive(Pending &request, std::size_t count, RtspRequestPhase phase);
@@ -56,4 +59,6 @@ private:
   RtspRequestInput &input_;
   RtspRequestClock &clock_;
   RtspRequestEffects &effects_;
+  RtspRequestBuffer ownedBuffer_;
+  RtspRequestBuffer &buffer_;
 };

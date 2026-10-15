@@ -5,6 +5,7 @@
 #include "session/pairing_session.hpp"
 #include "protocol/ap2/pairing_directory_port.hpp"
 #include "protocol/ap2/buffered_flush_policy.hpp"
+#include "protocol/rtsp/rtsp_request_buffer.hpp"
 #include "runtime/common.h"
 #include "playback/player.h"
 #include "timing/rtp_clock.hpp"
@@ -52,6 +53,7 @@ struct SessionState : PrincipalParticipant {
   uint32_t maximum_latency;  // set if an a=max-latency: line appears in the ANNOUNCE message; zero
                              // otherwise
   int fd = -1;
+  RtspRequestBuffer rtspRequestBuffer;
   SOCKADDR remote, local;
   volatile int stop;
 

@@ -23,11 +23,22 @@ bool RtspRequestReader::stopped(RtspRequestPhase phase) {
   return true;
 }
 
+void RtspRequestReader::consumeLineFeed(Pending &request) {
+  if (!buffer_.skipLineFeed || request.used == 0)
+    return;
+  if (request.bytes[0] == '\n') {
+    --request.used;
+    std::memmove(request.bytes.get(), request.bytes.get() + 1, request.used);
+  }
+  buffer_.skipLineFeed = false;
+}
+
 std::optional<RtspRequestStatus> RtspRequestReader::receive(Pending &request, std::size_t count,
                                                           RtspRequestPhase phase) {
   const auto received = input_.read(std::span(request.bytes.get(), request.capacity).subspan(request.used, count));
   if (received.count > 0) {
     request.used += received.count;
+    consumeLineFeed(request);
     return std::nullopt;
   }
   if (received.timedOut) {
@@ -45,12 +56,17 @@ std::optional<RtspRequestStatus> RtspRequestReader::receive(Pending &request, st
 }
 
 std::optional<RtspRequestStatus> RtspRequestReader::readHeaders(Pending &request) {
+  bool hasBufferedInput = request.used > 0;
   while (request.contentLength < 0) {
     if (stopped(RtspRequestPhase::headers))
       return RtspRequestStatus::shutdown;
-    if (auto failure = receive(request, request.capacity - request.used, RtspRequestPhase::headers))
-      return failure;
+    if (!hasBufferedInput) {
+      if (auto failure = receive(request, request.capacity - request.used, RtspRequestPhase::headers))
+        return failure;
+    }
+    hasBufferedInput = false;
     while (request.contentLength < 0) {
+      consumeLineFeed(request);
       const std::string_view buffered(request.bytes.get(), request.used);
       const auto delimiter = buffered.find_first_of("\r\n");
       if (delimiter == std::string_view::npos)
@@ -58,6 +74,7 @@ std::optional<RtspRequestStatus> RtspRequestReader::readHeaders(Pending &request
       auto consumed = delimiter + 1;
       if (buffered[delimiter] == '\r' && consumed < buffered.size() && buffered[consumed] == '\n')
         ++consumed;
+      buffer_.skipLineFeed = buffered[delimiter] == '\r' && consumed == delimiter + 1;
       auto line = buffered.substr(0, delimiter);
       line = line.substr(0, line.find('\0'));
       const auto parsed = request.message->readLine(line);
@@ -74,6 +91,7 @@ std::optional<RtspRequestStatus> RtspRequestReader::readHeaders(Pending &request
 }
 
 std::optional<RtspRequestStatus> RtspRequestReader::readBody(Pending &request) {
+  consumeLineFeed(request);
   if (request.contentLength <= 0)
     return std::nullopt;
   const auto threshold = clock_.nowNs() + std::uint64_t{15000000000};
@@ -102,12 +120,17 @@ RtspRequestResult RtspRequestReader::read() {
   auto phase = RtspRequestPhase::headers;
   try {
     Pending request;
+    request.used = buffer_.bytes.size();
+    std::memcpy(request.bytes.get(), buffer_.bytes.data(), request.used);
+    buffer_.bytes.clear();
     if (auto failure = readHeaders(request))
       return {*failure, {}};
     phase = RtspRequestPhase::body;
     if (auto failure = readBody(request))
       return {*failure, {}};
-    request.message->replaceBody(std::string_view(request.bytes.get(), request.used));
+    const auto length = static_cast<std::size_t>(request.contentLength);
+    request.message->replaceBody(std::string_view(request.bytes.get(), length));
+    buffer_.bytes.assign(request.bytes.get() + length, request.used - length);
     return {RtspRequestStatus::success, std::move(request.message)};
   } catch (const std::bad_alloc &) {
     effects_.diagnostic(RtspRequestDiagnostic::allocationFailure, phase, 0);

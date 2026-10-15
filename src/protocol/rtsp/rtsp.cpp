@@ -297,7 +297,7 @@ private:
 enum rtsp_read_request_response rtsp_read_request(rtsp_conn_info *conn, RtspMessage **the_packet) {
   *the_packet = nullptr;
   RuntimeRequestTransport transport(*conn);
-  RtspRequestReader reader(transport, transport, transport);
+  RtspRequestReader reader(transport, transport, transport, &conn->rtspRequestBuffer);
   auto result = reader.read();
   switch (result.status) {
   case RtspRequestStatus::success:
